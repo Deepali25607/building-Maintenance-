@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://building-maintenance-backend-dy07.onrender.com/api/:path*"
+    }
+  ]
+}
