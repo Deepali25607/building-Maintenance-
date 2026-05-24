@@ -114,10 +114,48 @@ function backfillProfiles() {
   }
 }
 
+// Idempotent UPSERT of the demo accounts. Runs on every boot so the demo
+// logins always work, even if someone created other users in the DB or the
+// password hashes got out of sync with the documented demo credentials.
+function ensureDemoAccounts() {
+  const DEMO_USERS = [
+    { name: "Super Admin",       email: "admin@demo.com", role: "super_admin", pw: "admin123" },
+    { name: "Priya (Committee)", email: "priya@demo.com", role: "committee",   pw: "priya123" },
+    { name: "Rahul (Treasurer)", email: "rahul@demo.com", role: "treasurer",   pw: "rahul123" },
+    { name: "Amit Resident",     email: "amit@demo.com",  role: "resident",    pw: "amit123" },
+    { name: "Sneha Resident",    email: "sneha@demo.com", role: "resident",    pw: "sneha123" },
+    { name: "Karan Resident",    email: "karan@demo.com", role: "resident",    pw: "karan123" },
+    { name: "Ravi Plumber",      email: "ravi@demo.com",  role: "maintenance", pw: "ravi123" },
+    { name: "Sunil Electrician", email: "sunil@demo.com", role: "maintenance", pw: "sunil123" },
+  ];
+
+  // Pick any existing apartment, or create the default one.
+  let ap = db.prepare("SELECT id FROM apartments LIMIT 1").get();
+  if (!ap) {
+    const info = db.prepare("INSERT INTO apartments (name, address) VALUES (?,?)")
+      .run("Greenwood Heights", "12 Park Lane, Pune");
+    ap = { id: info.lastInsertRowid };
+  }
+
+  const upsert = db.prepare(
+    `INSERT INTO users (apartment_id, name, email, password_hash, role, active)
+     VALUES (?, ?, ?, ?, ?, 1)
+     ON CONFLICT(email) DO UPDATE SET
+       password_hash = excluded.password_hash,
+       role = excluded.role,
+       active = 1`
+  );
+  for (const u of DEMO_USERS) {
+    upsert.run(ap.id, u.name, u.email, bcrypt.hashSync(u.pw, 10), u.role);
+  }
+  console.log(`Ensured ${DEMO_USERS.length} demo accounts (passwords reset to documented values).`);
+}
+
 function seed() {
   const existing = db.prepare("SELECT COUNT(*) AS n FROM users").get();
   if (existing.n > 0) {
     console.log("Database already has users — backfilling profiles and payment records.");
+    ensureDemoAccounts();
     backfillProfiles();
     backfillDefaultersDemo();
     backfillPayments();
