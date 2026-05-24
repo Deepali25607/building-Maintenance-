@@ -265,4 +265,10 @@ function seed() {
   console.log("  ravi@demo.com  / ravi123    (maintenance)");
 }
 
-seed();
+// Only auto-run when invoked as a CLI (e.g. `npm run seed`).
+// When required as a module (auto-seed on boot), the caller decides when to run.
+if (require.main === module) {
+  seed();
+}
+
+module.exports = { seed };

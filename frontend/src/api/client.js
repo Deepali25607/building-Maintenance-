@@ -1,6 +1,11 @@
 import axios from "axios";
 
-const api = axios.create({ baseURL: "/api" });
+// In dev, leave VITE_API_BASE_URL unset — Vite proxies "/api" to localhost:5000.
+// In production, set VITE_API_BASE_URL to the deployed backend, e.g.
+//   VITE_API_BASE_URL=https://building-maintenance-backend-dy07.onrender.com/api
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+});
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
