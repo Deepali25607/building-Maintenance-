@@ -36,7 +36,7 @@ export default function Incidents() {
         <button className="btn-primary" onClick={() => setNewOpen(true)}>+ Raise incident</button>
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="table">
           <thead>
             <tr>

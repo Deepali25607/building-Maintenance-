@@ -21,7 +21,7 @@ export default function Vendors() {
         <button className="btn-primary" onClick={() => setOpenNew(true)}>+ Add vendor</button>
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="table">
           <thead><tr><th>Name</th><th>Service</th><th>Phone</th><th>Email</th></tr></thead>
           <tbody>

@@ -41,7 +41,7 @@ export default function Users() {
         )}
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="table">
           <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Permissions</th><th>Active</th><th></th></tr></thead>
           <tbody>
