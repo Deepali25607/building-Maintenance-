@@ -70,10 +70,10 @@ function Stat({ label, value, hint, tone }) {
     slate: "text-slate-700",
   };
   return (
-    <div className="card p-4">
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`text-2xl font-bold mt-1 ${tones[tone] || ""}`}>{value}</div>
-      {hint && <div className="text-xs text-slate-400 mt-1">{hint}</div>}
+    <div className="card p-3 sm:p-4">
+      <div className="text-[10px] sm:text-xs uppercase tracking-wide text-slate-500 truncate">{label}</div>
+      <div className={`text-lg sm:text-2xl font-bold mt-0.5 sm:mt-1 ${tones[tone] || ""}`}>{value}</div>
+      {hint && <div className="text-[11px] sm:text-xs text-slate-400 mt-1">{hint}</div>}
     </div>
   );
 }
@@ -97,7 +97,7 @@ function AdminDashboard({ headingForResident = false }) {
 
       <AnnouncementMarquee items={data.active_announcements} />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mb-6">
         <Stat label="Total Collection" value={fmt(data.collected)} tone="green" />
         <Stat label="Pending Dues" value={fmt(data.pending)} tone="red" />
         <Stat label="Total Expenses" value={fmt(data.expenses)} tone="slate" />
@@ -482,7 +482,7 @@ function PersonalSnapshot() {
       <h1 className="text-2xl font-bold mb-1">{title}</h1>
       <p className="text-muted mb-4 text-sm">{subtitle}</p>
 
-      <div className={`grid grid-cols-1 ${isResident ? "md:grid-cols-3" : "md:grid-cols-2"} gap-4 mb-4`}>
+      <div className={`grid ${isResident ? "grid-cols-3 md:grid-cols-3" : "grid-cols-2 md:grid-cols-2"} gap-2 sm:gap-4 mb-4`}>
         {isResident && (
           <Stat label="My Amount Due" value={fmt(data.due)} tone={data.due > 0 ? "red" : "green"} />
         )}
