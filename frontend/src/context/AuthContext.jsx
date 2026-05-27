@@ -40,6 +40,14 @@ export function AuthProvider({ children }) {
     return data.user;
   }
 
+  // Called by the org-signup flow after the backend returns { token, user }.
+  // Persists both so the new admin lands authenticated, skipping login.
+  function setAfterSignup(token, freshUser) {
+    localStorage.setItem("token", token);
+    localStorage.setItem("user", JSON.stringify(freshUser));
+    setUser(freshUser);
+  }
+
   function logout() {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -55,7 +63,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, can, refreshUser }}>
+    <AuthContext.Provider value={{ user, login, logout, loading, can, refreshUser, setAfterSignup }}>
       {children}
     </AuthContext.Provider>
   );

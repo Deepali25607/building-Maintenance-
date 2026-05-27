@@ -25,7 +25,7 @@ function migrate() {
       email TEXT NOT NULL UNIQUE,
       phone TEXT,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('super_admin','committee','treasurer','resident','maintenance')),
+      role TEXT NOT NULL CHECK (role IN ('super_admin','org_admin','committee','treasurer','resident','maintenance')),
       avatar_url TEXT,
       bio TEXT,
       move_in_date TEXT,
@@ -165,6 +165,52 @@ ensureColumn("apartments", "theme_custom", "TEXT");
 ensureColumn("apartments", "tagline", "TEXT");
 ensureColumn("incidents", "attachments", "TEXT");
 ensureColumn("flats", "opening_balance", "REAL NOT NULL DEFAULT 0");
+
+// One-off: widen the users.role CHECK to allow the multi-tenant org_admin role.
+// SQLite can't ALTER a CHECK in place, so swap the table when the old constraint
+// is detected. Safe to run on every boot — it's a no-op if already migrated.
+(function migrateRoleCheck() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'users'").get();
+  if (!row || !row.sql) return;
+  if (row.sql.includes("'org_admin'")) return; // already migrated
+
+  const tx = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE users_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        apartment_id INTEGER REFERENCES apartments(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        phone TEXT,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('super_admin','org_admin','committee','treasurer','resident','maintenance')),
+        avatar_url TEXT,
+        bio TEXT,
+        move_in_date TEXT,
+        occupation TEXT,
+        family_members TEXT,
+        emergency_contact TEXT,
+        vehicle_info TEXT,
+        permissions TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      INSERT INTO users_new (id, apartment_id, name, email, phone, password_hash, role,
+                             avatar_url, bio, move_in_date, occupation, family_members,
+                             emergency_contact, vehicle_info, permissions, active, created_at)
+      SELECT id, apartment_id, name, email, phone, password_hash, role,
+             avatar_url, bio, move_in_date, occupation, family_members,
+             emergency_contact, vehicle_info, permissions, active, created_at
+      FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+    `);
+  });
+  // Foreign keys must be off during a table swap or referencing rows break.
+  db.pragma("foreign_keys = OFF");
+  try { tx(); } finally { db.pragma("foreign_keys = ON"); }
+  console.log("Migrated users.role CHECK to allow org_admin.");
+})();
 
 // Seed a sensible default tagline if missing (one-off)
 db.prepare("UPDATE apartments SET tagline = COALESCE(tagline, 'Premium Residences')").run();

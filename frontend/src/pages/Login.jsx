@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import api from "../api/client.js";
 
 const DEMO = [
-  { role: "Super Admin", email: "admin@demo.com", pw: "admin123" },
-  { role: "Committee", email: "priya@demo.com", pw: "priya123" },
-  { role: "Treasurer", email: "rahul@demo.com", pw: "rahul123" },
-  { role: "Resident", email: "amit@demo.com", pw: "amit123" },
-  { role: "Maintenance", email: "ravi@demo.com", pw: "ravi123" },
+  { role: "Platform Admin", email: "platform@demo.com", pw: "platform123" },
+  { role: "Org Admin",      email: "admin@demo.com",    pw: "admin123" },
+  { role: "Committee",      email: "priya@demo.com",    pw: "priya123" },
+  { role: "Treasurer",      email: "rahul@demo.com",    pw: "rahul123" },
+  { role: "Resident",       email: "amit@demo.com",     pw: "amit123" },
+  { role: "Maintenance",    email: "ravi@demo.com",     pw: "ravi123" },
 ];
 
 export default function Login() {
@@ -57,6 +58,13 @@ export default function Login() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        <p className="text-center text-sm text-muted mt-4">
+          New community?{" "}
+          <Link to="/signup" className="text-brand-700 font-medium hover:underline">
+            Create an organization
+          </Link>
+        </p>
 
         <div className="mt-6 pt-6 border-t border-slate-100">
           <div className="text-xs text-slate-500 mb-2 font-semibold uppercase tracking-wide">Demo accounts</div>

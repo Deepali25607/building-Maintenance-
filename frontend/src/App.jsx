@@ -4,6 +4,7 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import Layout from "./components/Layout.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Login from "./pages/Login.jsx";
+import Signup from "./pages/Signup.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Bills from "./pages/Bills.jsx";
 import Incidents from "./pages/Incidents.jsx";
@@ -28,6 +29,7 @@ export default function App() {
       <ThemeProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
         <Route element={<Shell />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/bills"        element={<ProtectedRoute need={["bills","view"]}><Bills /></ProtectedRoute>} />

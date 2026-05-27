@@ -1,7 +1,8 @@
 const express = require("express");
+const bcrypt = require("bcryptjs");
 const db = require("../db");
-const { requireAuth, requireRole } = require("../middleware/auth");
-const { isPlatformAdmin, requirePlatformAdmin } = require("../permissions");
+const { requireAuth, requireRole, signToken } = require("../middleware/auth");
+const { isPlatformAdmin, requirePlatformAdmin, effectivePermissions } = require("../permissions");
 
 const router = express.Router();
 
@@ -13,6 +14,70 @@ router.get("/branding", (_req, res) => {
     name: ap?.name || "Apartment Community",
     tagline: ap?.tagline || "Resident Portal",
   });
+});
+
+// Public organization signup — creates a new apartment AND its first
+// org_admin user in one atomic transaction. No auth required.
+//
+// Body: {
+//   org:   { name (required), tagline?, address? },
+//   admin: { name (required), email (required), password (required, ≥8), phone? }
+// }
+//
+// Returns: { token, user, apartment } — caller can drop the token straight
+// into localStorage and skip the login screen.
+router.post("/signup", (req, res) => {
+  const { org, admin } = req.body || {};
+  if (!org?.name || !String(org.name).trim()) {
+    return res.status(400).json({ error: "Organization name is required" });
+  }
+  if (!admin?.name || !admin?.email || !admin?.password) {
+    return res.status(400).json({ error: "Admin name, email, and password are required" });
+  }
+  const email = String(admin.email).trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "Admin email is not valid" });
+  }
+  if (String(admin.password).length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+
+  // Emails are globally unique across the platform (Phase 1 decision).
+  const taken = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  if (taken) return res.status(409).json({ error: "An account with this email already exists" });
+
+  const tx = db.transaction(() => {
+    const apInfo = db.prepare("INSERT INTO apartments (name, address, tagline) VALUES (?,?,?)")
+      .run(String(org.name).trim(), org.address?.trim() || null, org.tagline?.trim() || null);
+    const apartmentId = apInfo.lastInsertRowid;
+
+    const hash = bcrypt.hashSync(admin.password, 10);
+    const userInfo = db.prepare(
+      "INSERT INTO users (apartment_id, name, email, phone, password_hash, role, active) VALUES (?,?,?,?,?,?,1)"
+    ).run(apartmentId, String(admin.name).trim(), email, admin.phone?.trim() || null, hash, "org_admin");
+
+    return { apartmentId, userId: userInfo.lastInsertRowid };
+  });
+
+  let result;
+  try {
+    result = tx();
+  } catch (e) {
+    return res.status(500).json({ error: "Failed to create organization", detail: e.message });
+  }
+
+  const user = db.prepare(
+    "SELECT id, name, email, phone, role, apartment_id, avatar_url FROM users WHERE id = ?"
+  ).get(result.userId);
+  const apartment = db.prepare("SELECT id, name, tagline, address FROM apartments WHERE id = ?")
+    .get(result.apartmentId);
+
+  const safe = {
+    ...user,
+    permissions: effectivePermissions(user),
+    apartment,
+  };
+  res.status(201).json({ token: signToken(safe), user: safe, apartment });
 });
 
 router.use(requireAuth);
