@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { requirePermission, can } = require("../permissions");
+const { requirePermission, can, isPlatformAdmin, canAccessApartment } = require("../permissions");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -21,7 +21,10 @@ function stripFlatFinancials(flat) {
 }
 
 router.get("/", requirePermission("flats", "view"), (req, res) => {
-  const apartmentId = req.user.role === "super_admin" ? req.query.apartment_id : req.user.apartment_id;
+  // Platform admin may scope by ?apartment_id; everyone else is locked to their own.
+  const apartmentId = isPlatformAdmin(req.user)
+    ? (req.query.apartment_id || null)
+    : req.user.apartment_id;
   const flats = db
     .prepare(
       `SELECT f.*,
@@ -67,8 +70,8 @@ router.get("/:id", requirePermission("flats", "view"), (req, res) => {
     )
     .get(id);
   if (!flat) return res.status(404).json({ error: "Flat not found" });
-  if (flat.apartment_id !== req.user.apartment_id && req.user.role !== "super_admin") {
-    return res.status(403).json({ error: "Forbidden" });
+  if (!canAccessApartment(req.user, flat.apartment_id)) {
+    return res.status(403).json({ error: "Forbidden — cross-organization access denied" });
   }
 
   // Residents (and other non-finance roles) may view other flats' owner
@@ -166,8 +169,8 @@ router.delete("/:id", requirePermission("flats", "delete"), (req, res) => {
   const id = Number(req.params.id);
   const flat = db.prepare("SELECT * FROM flats WHERE id = ?").get(id);
   if (!flat) return res.status(404).json({ error: "Flat not found" });
-  if (flat.apartment_id !== req.user.apartment_id && req.user.role !== "super_admin") {
-    return res.status(403).json({ error: "Cross-apartment access denied" });
+  if (!canAccessApartment(req.user, flat.apartment_id)) {
+    return res.status(403).json({ error: "Cross-organization access denied" });
   }
   const billCount = db.prepare("SELECT COUNT(*) AS n FROM bills WHERE flat_id = ?").get(id).n;
   db.prepare("DELETE FROM flats WHERE id = ?").run(id);

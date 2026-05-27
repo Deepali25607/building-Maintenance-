@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { requirePermission, can } = require("../permissions");
+const { requirePermission, can, canAccessApartment } = require("../permissions");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -85,8 +85,8 @@ router.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
   const incident = db.prepare("SELECT * FROM incidents WHERE id = ?").get(id);
   if (!incident) return res.status(404).json({ error: "Not found" });
-  if (incident.apartment_id !== req.user.apartment_id && req.user.role !== "super_admin") {
-    return res.status(403).json({ error: "Forbidden" });
+  if (!canAccessApartment(req.user, incident.apartment_id)) {
+    return res.status(403).json({ error: "Forbidden — cross-organization access denied" });
   }
   const { status, assigned_to, priority, description, attachments } = req.body || {};
 
@@ -129,6 +129,11 @@ router.patch("/:id", (req, res) => {
 
 router.get("/:id/comments", (req, res) => {
   const id = Number(req.params.id);
+  const incident = db.prepare("SELECT apartment_id FROM incidents WHERE id = ?").get(id);
+  if (!incident) return res.status(404).json({ error: "Incident not found" });
+  if (!canAccessApartment(req.user, incident.apartment_id)) {
+    return res.status(403).json({ error: "Cross-organization access denied" });
+  }
   const comments = db
     .prepare(
       `SELECT c.*, u.name AS author_name, u.role AS author_role
@@ -145,6 +150,11 @@ router.post("/:id/comments", (req, res) => {
   const id = Number(req.params.id);
   const { body } = req.body || {};
   if (!body) return res.status(400).json({ error: "body required" });
+  const incident = db.prepare("SELECT apartment_id FROM incidents WHERE id = ?").get(id);
+  if (!incident) return res.status(404).json({ error: "Incident not found" });
+  if (!canAccessApartment(req.user, incident.apartment_id)) {
+    return res.status(403).json({ error: "Cross-organization access denied" });
+  }
   const info = db
     .prepare("INSERT INTO incident_comments (incident_id, user_id, body) VALUES (?,?,?)")
     .run(id, req.user.id, body);

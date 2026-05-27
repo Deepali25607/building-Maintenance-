@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { requirePermission } = require("../permissions");
+const { requirePermission, canAccessApartment, isPlatformAdmin } = require("../permissions");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -56,16 +56,16 @@ router.patch("/:id", requirePermission("expenses", "edit"), (req, res) => {
   const id = Number(req.params.id);
   const e = db.prepare("SELECT * FROM expenses WHERE id = ?").get(id);
   if (!e) return res.status(404).json({ error: "Not found" });
-  if (e.apartment_id !== req.user.apartment_id && req.user.role !== "super_admin") {
-    return res.status(403).json({ error: "Forbidden" });
+  if (!canAccessApartment(req.user, e.apartment_id)) {
+    return res.status(403).json({ error: "Forbidden — cross-organization access denied" });
   }
   const { status, amount, description, vendor_id, category, expense_date } = req.body || {};
 
-  const approverRoles = ["super_admin", "committee"];
+  const approverRoles = ["super_admin", "org_admin", "committee"];
   let approved_by = e.approved_by;
   if (status === "approved" && approverRoles.includes(req.user.role)) approved_by = req.user.id;
   if (status === "approved" && !approverRoles.includes(req.user.role)) {
-    return res.status(403).json({ error: "Only committee/super_admin can approve" });
+    return res.status(403).json({ error: "Only committee or admin can approve" });
   }
 
   db.prepare(

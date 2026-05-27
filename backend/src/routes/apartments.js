@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { isPlatformAdmin, requirePlatformAdmin } = require("../permissions");
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ router.get("/branding", (_req, res) => {
 router.use(requireAuth);
 
 router.get("/", (req, res) => {
-  if (req.user.role === "super_admin") {
+  if (isPlatformAdmin(req.user)) {
     return res.json({ apartments: db.prepare("SELECT * FROM apartments ORDER BY name").all() });
   }
   const ap = db.prepare("SELECT * FROM apartments WHERE id = ?").get(req.user.apartment_id);
@@ -31,7 +32,9 @@ router.get("/mine", (req, res) => {
   res.json({ apartment: ap });
 });
 
-router.post("/", requireRole("super_admin"), (req, res) => {
+// Creating a new organization is platform-admin-only — that's the SaaS
+// onboarding path. (Public signup endpoint comes in Phase 2.)
+router.post("/", requirePlatformAdmin, (req, res) => {
   const { name, address, tagline } = req.body || {};
   if (!name) return res.status(400).json({ error: "name required" });
   const info = db.prepare("INSERT INTO apartments (name, address, tagline) VALUES (?,?,?)")
@@ -39,10 +42,16 @@ router.post("/", requireRole("super_admin"), (req, res) => {
   res.status(201).json({ apartment: db.prepare("SELECT * FROM apartments WHERE id = ?").get(info.lastInsertRowid) });
 });
 
-router.patch("/:id", requireRole("super_admin"), (req, res) => {
+// Org admins can rename / re-tagline their own apartment; platform admin can do any.
+router.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare("SELECT * FROM apartments WHERE id = ?").get(id);
   if (!existing) return res.status(404).json({ error: "Apartment not found" });
+  const isOwnOrg = req.user.apartment_id === id;
+  const isOrgAdmin = req.user.role === "org_admin" && isOwnOrg;
+  if (!isPlatformAdmin(req.user) && !isOrgAdmin) {
+    return res.status(403).json({ error: "Only platform admin or this org's admin can update apartment" });
+  }
 
   const { name, tagline, address } = req.body || {};
   if (name !== undefined && !String(name).trim()) {

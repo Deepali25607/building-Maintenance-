@@ -118,8 +118,15 @@ function backfillProfiles() {
 // logins always work, even if someone created other users in the DB or the
 // password hashes got out of sync with the documented demo credentials.
 function ensureDemoAccounts() {
-  const DEMO_USERS = [
-    { name: "Super Admin",       email: "admin@demo.com", role: "super_admin", pw: "admin123" },
+  // Platform admin lives outside any specific apartment (apartment_id = NULL)
+  // so they can manage every organization on the platform.
+  const PLATFORM_ADMIN = {
+    name: "Platform Admin", email: "platform@demo.com", role: "super_admin", pw: "platform123",
+  };
+
+  // The rest belong to the demo organization "Greenwood Heights".
+  const ORG_USERS = [
+    { name: "Greenwood Admin",   email: "admin@demo.com", role: "org_admin",   pw: "admin123" },
     { name: "Priya (Committee)", email: "priya@demo.com", role: "committee",   pw: "priya123" },
     { name: "Rahul (Treasurer)", email: "rahul@demo.com", role: "treasurer",   pw: "rahul123" },
     { name: "Amit Resident",     email: "amit@demo.com",  role: "resident",    pw: "amit123" },
@@ -129,7 +136,6 @@ function ensureDemoAccounts() {
     { name: "Sunil Electrician", email: "sunil@demo.com", role: "maintenance", pw: "sunil123" },
   ];
 
-  // Pick any existing apartment, or create the default one.
   let ap = db.prepare("SELECT id FROM apartments LIMIT 1").get();
   if (!ap) {
     const info = db.prepare("INSERT INTO apartments (name, address) VALUES (?,?)")
@@ -143,12 +149,14 @@ function ensureDemoAccounts() {
      ON CONFLICT(email) DO UPDATE SET
        password_hash = excluded.password_hash,
        role = excluded.role,
+       apartment_id = excluded.apartment_id,
        active = 1`
   );
-  for (const u of DEMO_USERS) {
+  upsert.run(null, PLATFORM_ADMIN.name, PLATFORM_ADMIN.email, bcrypt.hashSync(PLATFORM_ADMIN.pw, 10), PLATFORM_ADMIN.role);
+  for (const u of ORG_USERS) {
     upsert.run(ap.id, u.name, u.email, bcrypt.hashSync(u.pw, 10), u.role);
   }
-  console.log(`Ensured ${DEMO_USERS.length} demo accounts (passwords reset to documented values).`);
+  console.log(`Ensured ${ORG_USERS.length + 1} demo accounts (1 platform admin + ${ORG_USERS.length} org users).`);
 }
 
 function seed() {
@@ -171,8 +179,10 @@ function seed() {
 
     const hash = (pw) => bcrypt.hashSync(pw, 10);
 
+    // Platform admin has no apartment binding — it spans every org.
+    const platformAdmin = { name: "Platform Admin", email: "platform@demo.com", role: "super_admin", pw: "platform123" };
     const users = [
-      { name: "Super Admin", email: "admin@demo.com", role: "super_admin", pw: "admin123" },
+      { name: "Greenwood Admin", email: "admin@demo.com", role: "org_admin", pw: "admin123" },
       { name: "Priya (Committee)", email: "priya@demo.com", role: "committee", pw: "priya123" },
       { name: "Rahul (Treasurer)", email: "rahul@demo.com", role: "treasurer", pw: "rahul123" },
       { name: "Amit Resident", email: "amit@demo.com", role: "resident", pw: "amit123" },
@@ -185,6 +195,8 @@ function seed() {
     const insertUser = db.prepare(
       "INSERT INTO users (apartment_id, name, email, password_hash, role) VALUES (?,?,?,?,?)"
     );
+    // platform admin first, apartment_id = NULL
+    insertUser.run(null, platformAdmin.name, platformAdmin.email, hash(platformAdmin.pw), platformAdmin.role);
     for (const u of users) {
       const info = insertUser.run(apId, u.name, u.email, hash(u.pw), u.role);
       userIds[u.email] = info.lastInsertRowid;
@@ -296,11 +308,12 @@ function seed() {
   });
   tx();
   console.log("Seed complete. Demo logins:");
-  console.log("  admin@demo.com / admin123   (super_admin)");
-  console.log("  priya@demo.com / priya123   (committee)");
-  console.log("  rahul@demo.com / rahul123   (treasurer)");
-  console.log("  amit@demo.com  / amit123    (resident)");
-  console.log("  ravi@demo.com  / ravi123    (maintenance)");
+  console.log("  platform@demo.com / platform123 (super_admin — manages every org)");
+  console.log("  admin@demo.com    / admin123    (org_admin — manages Greenwood)");
+  console.log("  priya@demo.com    / priya123    (committee)");
+  console.log("  rahul@demo.com    / rahul123    (treasurer)");
+  console.log("  amit@demo.com     / amit123     (resident)");
+  console.log("  ravi@demo.com     / ravi123     (maintenance)");
 }
 
 // Only auto-run when invoked as a CLI (e.g. `npm run seed`).

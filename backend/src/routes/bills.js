@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { requirePermission } = require("../permissions");
+const { requirePermission, canAccessApartment, isPlatformAdmin } = require("../permissions");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -78,8 +78,8 @@ router.post("/:id/pay", (req, res) => {
   if (req.user.role === "resident" && bill.owner_id !== req.user.id) {
     return res.status(403).json({ error: "Not your bill" });
   }
-  if (bill.apartment_id !== req.user.apartment_id && req.user.role !== "super_admin") {
-    return res.status(403).json({ error: "Cross-apartment access denied" });
+  if (!canAccessApartment(req.user, bill.apartment_id)) {
+    return res.status(403).json({ error: "Cross-organization access denied" });
   }
 
   const tx = db.transaction(() => {
@@ -98,6 +98,18 @@ router.post("/:id/pay", (req, res) => {
 
 router.get("/:id/payments", (req, res) => {
   const id = Number(req.params.id);
+  // Resolve the bill's apartment via its flat before exposing payments.
+  const bill = db.prepare(
+    "SELECT f.apartment_id, f.owner_id FROM bills b JOIN flats f ON f.id = b.flat_id WHERE b.id = ?"
+  ).get(id);
+  if (!bill) return res.status(404).json({ error: "Bill not found" });
+  if (!canAccessApartment(req.user, bill.apartment_id)) {
+    return res.status(403).json({ error: "Cross-organization access denied" });
+  }
+  // Residents can only see payment history of their own bills.
+  if (req.user.role === "resident" && bill.owner_id !== req.user.id) {
+    return res.status(403).json({ error: "Not your bill" });
+  }
   const payments = db
     .prepare("SELECT p.*, u.name AS recorded_by_name FROM payments p LEFT JOIN users u ON u.id = p.recorded_by WHERE p.bill_id = ? ORDER BY p.paid_at DESC")
     .all(id);
