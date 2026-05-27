@@ -62,35 +62,34 @@ router.put("/:id/permissions", requirePermission("users", "edit"), (req, res) =>
 });
 
 router.get("/", requirePermission("users", "view"), (req, res) => {
-  // Tenant isolation: only platform admins can list users across all orgs.
-  // Optionally they can pass ?apartment_id=N to scope the listing.
-  let rows;
+  // Tenant isolation rules:
+  //   - Platform admin with no X-Org-Id header → sees every user.
+  //   - Platform admin impersonating an org (X-Org-Id set) → only that org.
+  //   - Anyone else → only their own apartment.
+  // ?apartment_id= query param works as an explicit override for platform admins.
+  const explicitFilter = req.query.apartment_id ? Number(req.query.apartment_id) : null;
+  let filterAp = null;
   if (isPlatformAdmin(req.user)) {
-    const filterAp = req.query.apartment_id ? Number(req.query.apartment_id) : null;
-    rows = filterAp
-      ? db.prepare(
-          `SELECT id, apartment_id, name, email, phone, role, avatar_url, bio, move_in_date,
-                  occupation, family_members, emergency_contact, vehicle_info,
-                  active, created_at
-           FROM users WHERE apartment_id = ? OR apartment_id IS NULL
-           ORDER BY created_at DESC`
-        ).all(filterAp)
-      : db.prepare(
-          `SELECT id, apartment_id, name, email, phone, role, avatar_url, bio, move_in_date,
-                  occupation, family_members, emergency_contact, vehicle_info,
-                  active, created_at
-           FROM users ORDER BY created_at DESC`
-        ).all();
+    if (explicitFilter) filterAp = explicitFilter;
+    else if (req.headers["x-org-id"]) filterAp = req.user.apartment_id;
+    // else: no filter — list everyone
   } else {
-    rows = db
-      .prepare(
+    filterAp = req.user.apartment_id;
+  }
+
+  const rows = filterAp == null
+    ? db.prepare(
+        `SELECT id, apartment_id, name, email, phone, role, avatar_url, bio, move_in_date,
+                occupation, family_members, emergency_contact, vehicle_info,
+                active, created_at
+         FROM users ORDER BY created_at DESC`
+      ).all()
+    : db.prepare(
         `SELECT id, apartment_id, name, email, phone, role, avatar_url, bio, move_in_date,
                 occupation, family_members, emergency_contact, vehicle_info,
                 active, created_at
          FROM users WHERE apartment_id = ? ORDER BY created_at DESC`
-      )
-      .all(req.user.apartment_id);
-  }
+      ).all(filterAp);
   res.json({ users: rows });
 });
 

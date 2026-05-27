@@ -10,6 +10,9 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // When a platform admin is "viewing as" an org, scope every API call to it.
+  const viewingOrg = localStorage.getItem("viewing_org_id");
+  if (viewingOrg) config.headers["X-Org-Id"] = viewingOrg;
   return config;
 });
 

@@ -22,10 +22,24 @@ function requireAuth(req, res, next) {
       .prepare("SELECT id, role, apartment_id, active, permissions FROM users WHERE id = ?")
       .get(payload.id);
     if (!row || !row.active) return res.status(401).json({ error: "User disabled or removed" });
+
+    // Platform admins can scope a request to any tenant via the X-Org-Id
+    // header. This lets the platform UI "view as" any organization without
+    // a new login. Ignored for everyone else (no privilege escalation).
+    let effectiveApartmentId = row.apartment_id;
+    const orgHeader = req.headers["x-org-id"];
+    if (orgHeader && row.role === "super_admin") {
+      const requested = Number(orgHeader);
+      if (Number.isFinite(requested) && requested > 0) {
+        effectiveApartmentId = requested;
+      }
+    }
+
     req.user = {
       id: row.id,
       role: row.role,
-      apartment_id: row.apartment_id,
+      apartment_id: effectiveApartmentId,
+      real_apartment_id: row.apartment_id, // original, before impersonation
       permissions: row.permissions,
     };
     next();

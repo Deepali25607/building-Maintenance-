@@ -5,6 +5,7 @@ import Layout from "./components/Layout.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Login from "./pages/Login.jsx";
 import Signup from "./pages/Signup.jsx";
+import Platform from "./pages/Platform.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Bills from "./pages/Bills.jsx";
 import Incidents from "./pages/Incidents.jsx";
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/reports"      element={<ProtectedRoute need={["reports","view"]}><Reports /></ProtectedRoute>} />
           <Route path="/theme"        element={<ProtectedRoute need={["theme","view"]}><ThemePage /></ProtectedRoute>} />
           <Route path="/profile"      element={<Profile />} />
+          <Route path="/platform"     element={<ProtectedRoute roles={["super_admin"]}><Platform /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

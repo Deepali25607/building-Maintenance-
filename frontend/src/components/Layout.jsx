@@ -23,6 +23,7 @@ const NAV = [
   { to: "/reports", label: "Reports", icon: "📈", need: ["reports", "view"] },
   { to: "/theme", label: "Theme", icon: "🎨", need: ["theme", "view"] },
   { to: "/profile", label: "My Profile", icon: "👤" }, // always visible — self-service
+  { to: "/platform", label: "Platform", icon: "🛰️", platformOnly: true }, // super_admin only
 ];
 
 export default function Layout() {
@@ -30,7 +31,13 @@ export default function Layout() {
   const { mode, toggleMode } = useTheme();
   const nav = useNavigate();
   const location = useLocation();
-  const items = NAV.filter((i) => !i.need || can(i.need[0], i.need[1]));
+  const isPlatformAdmin = user?.role === "super_admin";
+  const items = NAV.filter((i) => {
+    if (i.platformOnly) return isPlatformAdmin;
+    if (i.need) return can(i.need[0], i.need[1]);
+    return true;
+  });
+  const viewingOrgId = typeof window !== "undefined" ? window.localStorage.getItem("viewing_org_id") : null;
 
   // Mobile drawer state — desktop ignores this and keeps sidebar always-on.
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -130,6 +137,20 @@ export default function Layout() {
           </button>
         </header>
 
+        {viewingOrgId && isPlatformAdmin && (
+          <div className="bg-amber-50 border-b border-amber-300 px-3 sm:px-6 py-2 flex items-center justify-between gap-3 text-sm">
+            <div className="text-amber-900 truncate">
+              <span className="font-semibold">🛰️ Viewing as organization #{viewingOrgId}</span>
+              <span className="hidden sm:inline ml-2 text-amber-700">— all queries are scoped to this tenant.</span>
+            </div>
+            <button
+              onClick={() => { window.localStorage.removeItem("viewing_org_id"); window.location.reload(); }}
+              className="text-xs text-amber-900 hover:underline whitespace-nowrap"
+            >
+              Exit view-as
+            </button>
+          </div>
+        )}
         <div className="max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
           <Outlet />
         </div>

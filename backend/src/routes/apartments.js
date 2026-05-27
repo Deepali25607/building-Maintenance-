@@ -84,7 +84,20 @@ router.use(requireAuth);
 
 router.get("/", (req, res) => {
   if (isPlatformAdmin(req.user)) {
-    return res.json({ apartments: db.prepare("SELECT * FROM apartments ORDER BY name").all() });
+    // Enrich with per-org counts so the platform UI can show health at a glance.
+    const apartments = db.prepare(
+      `SELECT a.*,
+              (SELECT COUNT(*) FROM users u WHERE u.apartment_id = a.id) AS user_count,
+              (SELECT COUNT(*) FROM flats f WHERE f.apartment_id = a.id) AS flat_count,
+              (SELECT COUNT(*) FROM bills b JOIN flats f ON f.id = b.flat_id
+                 WHERE f.apartment_id = a.id) AS bill_count,
+              (SELECT COUNT(*) FROM incidents i
+                 WHERE i.apartment_id = a.id AND i.status != 'closed') AS open_incidents,
+              (SELECT COUNT(*) FROM announcements an
+                 WHERE an.apartment_id = a.id AND an.completed = 0) AS active_announcements
+       FROM apartments a ORDER BY a.name`
+    ).all();
+    return res.json({ apartments });
   }
   const ap = db.prepare("SELECT * FROM apartments WHERE id = ?").get(req.user.apartment_id);
   res.json({ apartments: ap ? [ap] : [] });
@@ -136,6 +149,25 @@ router.patch("/:id", (req, res) => {
   );
   const updated = db.prepare("SELECT id, name, tagline, address FROM apartments WHERE id = ?").get(id);
   res.json({ apartment: updated });
+});
+
+// Hard-delete an organization. Platform-admin-only. Foreign keys cascade
+// to flats, bills, payments, incidents, vendors, expenses, announcements.
+// Users are set NULL (so platform admin accounts survive even if their last
+// associated tenant goes away).
+router.delete("/:id", requirePlatformAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare("SELECT id, name FROM apartments WHERE id = ?").get(id);
+  if (!existing) return res.status(404).json({ error: "Apartment not found" });
+
+  // Disallow deleting the apartment the requesting platform admin happens
+  // to belong to — avoids accidentally locking themselves out.
+  if (req.user.apartment_id === id) {
+    return res.status(400).json({ error: "Cannot delete the organization you are signed into" });
+  }
+
+  const info = db.prepare("DELETE FROM apartments WHERE id = ?").run(id);
+  res.json({ ok: true, deleted: existing, rows: info.changes });
 });
 
 module.exports = router;

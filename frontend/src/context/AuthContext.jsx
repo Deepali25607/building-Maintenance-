@@ -51,6 +51,7 @@ export function AuthProvider({ children }) {
   function logout() {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    localStorage.removeItem("viewing_org_id"); // drop any platform-admin impersonation
     setUser(null);
   }
 
