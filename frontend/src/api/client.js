@@ -10,16 +10,23 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  // When a platform admin is "viewing as" an org, scope every API call to it.
-  const viewingOrg = localStorage.getItem("viewing_org_id");
-  if (viewingOrg) config.headers["X-Org-Id"] = viewingOrg;
   return config;
 });
 
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err.response?.status === 401) {
+    const status = err.response?.status;
+    const code = err.response?.data?.code;
+    // Org trial has ended — the backend blocks every request. Drop the session
+    // and route to the "contact sales" screen instead of the normal login.
+    if (status === 403 && code === "trial_expired") {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      if (!location.pathname.startsWith("/account/suspended")) {
+        location.href = "/account/suspended";
+      }
+    } else if (status === 401) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
       if (!location.pathname.startsWith("/login")) location.href = "/login";

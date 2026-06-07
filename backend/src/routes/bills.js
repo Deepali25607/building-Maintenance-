@@ -2,9 +2,12 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission, canAccessApartment, isPlatformAdmin } = require("../permissions");
+const { notify } = require("../notifications");
 
 const router = express.Router();
 router.use(requireAuth);
+
+const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 function recomputeStatus(bill) {
   const today = new Date().toISOString().slice(0, 10);
@@ -55,15 +58,23 @@ router.post("/generate", requirePermission("bills", "create"), (req, res) => {
      VALUES (?,?,?,?,?,?)`
   );
   let created = 0;
+  const notifyOwnerIds = [];
   const tx = db.transaction(() => {
     for (const f of flats) {
       const status = isOverdue ? "overdue" : "pending";
       const penalty = isOverdue ? penalty_amount : 0;
       const info = insert.run(f.id, period, f.monthly_rate, penalty, due_date, status);
-      if (info.changes > 0) created += 1;
+      if (info.changes > 0) { created += 1; if (f.owner_id) notifyOwnerIds.push(f.owner_id); }
     }
   });
   tx();
+  // Notify only owners who got a freshly-generated bill (INSERT OR IGNORE skips re-runs).
+  notify({
+    apartmentId: apId, userIds: notifyOwnerIds, type: "bill_generated",
+    title: "New maintenance bill",
+    body: `Your maintenance bill for ${period} is ready. Due ${due_date}.`,
+    link: "/bills",
+  });
   res.json({ created, total_flats: flats.length, period });
 });
 
@@ -92,6 +103,15 @@ router.post("/:id/pay", (req, res) => {
     db.prepare("UPDATE bills SET paid_amount = ?, status = ? WHERE id = ?").run(newPaid, status, id);
   });
   tx();
+  // Receipt notification to the flat owner (in-app + any external channels).
+  if (bill.owner_id) {
+    notify({
+      apartmentId: bill.apartment_id, userIds: [bill.owner_id], type: "payment_received",
+      title: "Payment received",
+      body: `${inr(amount)} recorded for ${bill.period}${reference ? ` (ref ${reference})` : ""}.`,
+      link: "/bills",
+    });
+  }
   const refreshed = db.prepare("SELECT * FROM bills WHERE id = ?").get(id);
   res.json({ bill: refreshed });
 });

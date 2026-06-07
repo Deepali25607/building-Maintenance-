@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/client.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -8,16 +8,22 @@ export default function Signup() {
   const { setAfterSignup } = useAuth();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [plans, setPlans] = useState([]);
   const [form, setForm] = useState({
     orgName: "",
     orgTagline: "",
     orgAddress: "",
+    plan: "trial",
     adminName: "",
     adminEmail: "",
     adminPhone: "",
     adminPassword: "",
     confirmPassword: "",
   });
+
+  useEffect(() => {
+    api.get("/apartments/plans").then((r) => setPlans(r.data.plans || [])).catch(() => {});
+  }, []);
 
   function update(patch) { setForm({ ...form, ...patch }); }
 
@@ -41,6 +47,7 @@ export default function Signup() {
           name: form.orgName,
           tagline: form.orgTagline || undefined,
           address: form.orgAddress || undefined,
+          plan: form.plan,
         },
         admin: {
           name: form.adminName,
@@ -96,6 +103,32 @@ export default function Signup() {
                 </div>
               </div>
             </div>
+          </section>
+
+          <section className="pt-3 border-t border-slate-100">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Choose your plan</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {plans.map((p) => {
+                const selected = form.plan === p.key;
+                return (
+                  <button type="button" key={p.key} onClick={() => update({ plan: p.key })}
+                    className={`text-left rounded-lg border p-3 transition ${selected ? "border-brand-500 ring-2 ring-brand-100 bg-brand-50/50" : "border-line hover:bg-surface-2"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-sm">{p.name}</span>
+                      {p.is_trial
+                        ? <span className="badge bg-emerald-100 text-emerald-700 text-[10px]">14 days free</span>
+                        : selected && <span className="badge bg-brand-100 text-brand-700 text-[10px]">selected</span>}
+                    </div>
+                    <div className="text-[11px] text-muted mt-0.5">{p.blurb}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted mt-1.5">
+              {form.plan === "trial"
+                ? "Start free for 14 days — no charge. You can switch plans anytime."
+                : "You can change your plan later from platform administration."}
+            </p>
           </section>
 
           <section className="pt-3 border-t border-slate-100">

@@ -21,6 +21,11 @@ export default function Profile() {
   const [err, setErr] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdMsg, setPwdMsg] = useState("");
+  const [pwdErr, setPwdErr] = useState("");
+
   useEffect(() => {
     if (!user) return;
     api.get(`/users/${user.id}`).then((r) => {
@@ -97,6 +102,34 @@ export default function Profile() {
       setErr(e.response?.data?.error || "Failed to save");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function changePassword() {
+    setPwdBusy(true);
+    setPwdMsg("");
+    setPwdErr("");
+    if (pwd.next.length < 8) {
+      setPwdErr("New password must be at least 8 characters.");
+      setPwdBusy(false);
+      return;
+    }
+    if (pwd.next !== pwd.confirm) {
+      setPwdErr("New password and confirmation do not match.");
+      setPwdBusy(false);
+      return;
+    }
+    try {
+      await api.post("/auth/change-password", {
+        current_password: pwd.current,
+        new_password: pwd.next,
+      });
+      setPwd({ current: "", next: "", confirm: "" });
+      setPwdMsg("Password updated.");
+    } catch (e) {
+      setPwdErr(e.response?.data?.error || "Failed to change password");
+    } finally {
+      setPwdBusy(false);
     }
   }
 
@@ -232,6 +265,10 @@ export default function Profile() {
             <div className="font-medium">{user.apartment?.name || "—"}</div>
           </div>
           <div>
+            <div className="text-muted text-xs">Organization ID</div>
+            <div className="font-medium font-mono">{user.apartment?.org_code || "—"}</div>
+          </div>
+          <div>
             <div className="text-muted text-xs">User ID</div>
             <div className="font-medium">#{user.id}</div>
           </div>
@@ -239,6 +276,44 @@ export default function Profile() {
         <p className="text-[11px] text-muted mt-3">
           Role, community assignment, dues, opening balance, and other financial records can only be changed by the committee or super admin.
         </p>
+      </div>
+
+      <div className="card p-5 mb-5">
+        <div className="mb-3">
+          <div className="text-xs uppercase tracking-wide text-muted">Security</div>
+          <h2 className="font-display text-lg font-semibold">Change password</h2>
+          <p className="text-muted text-sm">
+            Enter your current password to set a new one. Must be at least 8 characters.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="label">Current password</label>
+            <input type="password" className="input" autoComplete="current-password"
+              value={pwd.current}
+              onChange={(e) => setPwd({ ...pwd, current: e.target.value })} />
+          </div>
+          <div>
+            <label className="label">New password</label>
+            <input type="password" className="input" autoComplete="new-password"
+              value={pwd.next}
+              onChange={(e) => setPwd({ ...pwd, next: e.target.value })} />
+          </div>
+          <div>
+            <label className="label">Confirm new password</label>
+            <input type="password" className="input" autoComplete="new-password"
+              value={pwd.confirm}
+              onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} />
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mt-4">
+          <button className="btn-secondary" onClick={changePassword}
+            disabled={pwdBusy || !pwd.current || !pwd.next || !pwd.confirm}>
+            {pwdBusy ? "Updating…" : "Update password"}
+          </button>
+          {pwdMsg && <span className="text-xs text-emerald-700">{pwdMsg}</span>}
+          {pwdErr && <span className="text-xs text-red-600">{pwdErr}</span>}
+        </div>
       </div>
 
       <div className="flex items-center gap-3">

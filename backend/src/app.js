@@ -17,15 +17,20 @@ app.get("/api/health", (_req, res) => res.json({ status: "ok", uptime: process.u
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/apartments", require("./routes/apartments"));
+app.use("/api/platform", require("./routes/platform"));
 app.use("/api/flats", require("./routes/flats"));
+app.use("/api/towers", require("./routes/towers"));
 app.use("/api/bills", require("./routes/bills"));
 app.use("/api/incidents", require("./routes/incidents"));
 app.use("/api/expenses", require("./routes/expenses"));
 app.use("/api/vendors", require("./routes/vendors"));
+app.use("/api/visitors", require("./routes/visitors"));
 app.use("/api/announcements", require("./routes/announcements"));
 app.use("/api/theme", require("./routes/theme"));
 app.use("/api/dashboard", require("./routes/dashboard"));
 app.use("/api/reports", require("./routes/reports"));
+app.use("/api/accounting", require("./routes/accounting"));
+app.use("/api/notifications", require("./routes/notifications"));
 
 app.use((err, _req, res, _next) => {
   console.error(err);

@@ -6,21 +6,51 @@ import Modal from "../components/Modal.jsx";
 
 const STATUS_FLOW = ["open", "assigned", "in_progress", "resolved", "closed"];
 
+// SLA standing → badge style + label. `sla` is the computed object from the API.
+function SlaBadge({ sla }) {
+  if (!sla || sla.state === "unknown") return <span className="text-xs text-slate-400">—</span>;
+  const overdue = sla.hours_remaining != null && sla.hours_remaining < 0;
+  const map = {
+    on_track: ["bg-emerald-50 text-emerald-700 border-emerald-200", `On track · ${sla.hours_remaining}h left`],
+    due_soon: ["bg-amber-50 text-amber-800 border-amber-200", `Due soon · ${sla.hours_remaining}h left`],
+    breached: overdue
+      ? ["bg-red-50 text-red-700 border-red-200", `Overdue ${Math.abs(sla.hours_remaining)}h`]
+      : ["bg-red-50 text-red-700 border-red-200", "Breached"],
+    met: ["bg-emerald-50 text-emerald-700 border-emerald-200", "Met"],
+  };
+  const [cls, label] = map[sla.state] || ["bg-slate-50 text-slate-600 border-slate-200", sla.state];
+  return <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${cls}`}>{label}</span>;
+}
+
+function EscalationBadge({ level }) {
+  if (!level) return null;
+  return <span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 whitespace-nowrap">⏫ L{level}</span>;
+}
+
 export default function Incidents() {
   const { user } = useAuth();
   const [list, setList] = useState([]);
+  const [summary, setSummary] = useState({ breached: 0, due_soon: 0, escalated: 0, total: 0 });
+  const [breachedOnly, setBreachedOnly] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [slaConfig, setSlaConfig] = useState(null);
   const [staff, setStaff] = useState([]);
   const [newOpen, setNewOpen] = useState(false);
+  const [slaOpen, setSlaOpen] = useState(false);
   const [detail, setDetail] = useState(null);
 
   function load() {
-    api.get("/incidents").then((r) => setList(r.data.incidents));
+    api.get(`/incidents${breachedOnly ? "?breached=1" : ""}`).then((r) => {
+      setList(r.data.incidents);
+      if (r.data.summary) setSummary(r.data.summary);
+    });
   }
 
+  useEffect(() => { load(); }, [breachedOnly]);
+
   useEffect(() => {
-    load();
     api.get("/incidents/categories").then((r) => setCategories(r.data.categories));
+    api.get("/incidents/sla/config").then((r) => setSlaConfig(r.data)).catch(() => {});
     if (["super_admin", "committee"].includes(user?.role)) {
       api.get("/users").then((r) => setStaff(r.data.users.filter((u) => u.role === "maintenance")));
     }
@@ -28,19 +58,44 @@ export default function Incidents() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">Incidents</h1>
-          <p className="text-slate-500 text-sm">Raise, track, and resolve community issues.</p>
+          <p className="text-slate-500 text-sm">Raise, track, and resolve community issues within SLA.</p>
         </div>
-        <button className="btn-primary" onClick={() => setNewOpen(true)}>+ Raise incident</button>
+        <div className="flex items-center gap-2">
+          {slaConfig?.editable && (
+            <button className="btn-secondary" onClick={() => setSlaOpen(true)}>⚙ SLA settings</button>
+          )}
+          <button className="btn-primary" onClick={() => setNewOpen(true)}>+ Raise incident</button>
+        </div>
       </div>
+
+      {(summary.breached > 0 || summary.due_soon > 0 || summary.escalated > 0) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+          {summary.breached > 0 && (
+            <button onClick={() => setBreachedOnly((v) => !v)}
+              className={`px-3 py-1.5 rounded-full border ${breachedOnly ? "bg-red-600 text-white border-red-600" : "bg-red-50 border-red-200 text-red-700"}`}>
+              🔴 {summary.breached} breaching SLA{breachedOnly ? " — showing only these" : ""}
+            </button>
+          )}
+          {summary.due_soon > 0 && (
+            <span className="px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800">⏳ {summary.due_soon} due soon</span>
+          )}
+          {summary.escalated > 0 && (
+            <span className="px-3 py-1.5 rounded-full bg-violet-50 border border-violet-200 text-violet-700">⏫ {summary.escalated} escalated</span>
+          )}
+          {breachedOnly && (
+            <button onClick={() => setBreachedOnly(false)} className="text-xs text-slate-500 hover:underline">Clear filter</button>
+          )}
+        </div>
+      )}
 
       <div className="card overflow-x-auto">
         <table className="table">
           <thead>
             <tr>
-              <th>#</th><th>Title</th><th>Category</th><th>Priority</th><th>Status</th><th>Raised by</th><th>Assigned to</th><th>Created</th>
+              <th>#</th><th>Title</th><th>Category</th><th>Priority</th><th>Status</th><th>SLA</th><th>Assigned to</th><th>Created</th>
             </tr>
           </thead>
           <tbody>
@@ -48,11 +103,13 @@ export default function Incidents() {
             {list.map((i) => (
               <tr key={i.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setDetail(i)}>
                 <td>#{i.id}</td>
-                <td className="font-medium">{i.title}</td>
+                <td className="font-medium">
+                  <div className="flex items-center gap-2">{i.title} <EscalationBadge level={i.escalation_level} /></div>
+                </td>
                 <td>{i.category}</td>
                 <td><StatusBadge value={i.priority} /></td>
                 <td><StatusBadge value={i.status} /></td>
-                <td className="text-slate-500">{i.raised_by_name}</td>
+                <td><SlaBadge sla={i.sla} /></td>
                 <td className="text-slate-500">{i.assigned_to_name || "—"}</td>
                 <td className="text-slate-500 text-xs">{i.created_at?.slice(0, 16).replace("T", " ")}</td>
               </tr>
@@ -61,13 +118,94 @@ export default function Incidents() {
         </table>
       </div>
 
-      <NewIncident open={newOpen} onClose={() => setNewOpen(false)} categories={categories} onCreated={load} />
+      <NewIncident open={newOpen} onClose={() => setNewOpen(false)} categories={categories} slaConfig={slaConfig} onCreated={load} />
+      <SlaSettings open={slaOpen} onClose={() => setSlaOpen(false)} config={slaConfig}
+        onSaved={(matrix) => { setSlaConfig((c) => ({ ...c, sla_matrix: matrix })); load(); }} />
       <IncidentDetail incident={detail} onClose={() => setDetail(null)} staff={staff} onUpdated={load} />
     </div>
   );
 }
 
-function NewIncident({ open, onClose, categories, onCreated }) {
+const PRIORITY_META = [
+  { key: "urgent", label: "Urgent", hint: "Critical — safety/security, total outage" },
+  { key: "high", label: "High", hint: "Major disruption to many residents" },
+  { key: "medium", label: "Medium", hint: "Normal issues" },
+  { key: "low", label: "Low", hint: "Minor / cosmetic" },
+];
+
+function SlaSettings({ open, onClose, config, onSaved }) {
+  const [form, setForm] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (open && config?.sla_matrix) {
+      setForm({ ...config.sla_matrix });
+      setErr("");
+    }
+  }, [open, config]);
+
+  async function save() {
+    setErr("");
+    for (const p of PRIORITY_META) {
+      const v = Number(form[p.key]);
+      if (!Number.isInteger(v) || v < 1 || v > 8760) {
+        setErr(`${p.label} must be a whole number of hours between 1 and 8760.`);
+        return;
+      }
+    }
+    setBusy(true);
+    try {
+      const r = await api.put("/incidents/sla/config", { sla_matrix: form });
+      onSaved?.(r.data.sla_matrix);
+      onClose();
+    } catch (e) {
+      setErr(e.response?.data?.error || "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function resetDefaults() {
+    if (config?.defaults) setForm({ ...config.defaults });
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="SLA settings"
+      footer={<>
+        <button className="btn-secondary text-xs" onClick={resetDefaults} disabled={busy}>Reset to defaults</button>
+        <div className="flex-1" />
+        <button className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+        <button className="btn-primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+      </>}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          Set the resolution deadline (in hours) for each priority. New incidents use these to compute
+          their SLA. Existing incidents keep the SLA they were created with.
+        </p>
+        {PRIORITY_META.map((p) => (
+          <div key={p.key} className="flex items-center gap-3">
+            <div className="w-24">
+              <StatusBadge value={p.key} />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <input type="number" min="1" max="8760" className="input w-28 py-1.5"
+                  value={form[p.key] ?? ""}
+                  onChange={(e) => setForm({ ...form, [p.key]: e.target.value })} />
+                <span className="text-xs text-muted">hours</span>
+              </div>
+              <div className="text-[11px] text-muted mt-0.5">{p.hint}</div>
+            </div>
+          </div>
+        ))}
+        {err && <div className="text-sm text-red-600">{err}</div>}
+      </div>
+    </Modal>
+  );
+}
+
+function NewIncident({ open, onClose, categories, slaConfig, onCreated }) {
   const [form, setForm] = useState({ category: "Water Leakage", title: "", description: "", priority: "medium" });
   const [files, setFiles] = useState([]); // array of File objects (pending upload)
   const [previews, setPreviews] = useState([]); // matching object URLs
@@ -150,6 +288,11 @@ function NewIncident({ open, onClose, categories, onCreated }) {
             <option value="low">Low</option><option value="medium">Medium</option>
             <option value="high">High</option><option value="urgent">Urgent</option>
           </select>
+          {slaConfig?.sla_matrix?.[form.priority] != null && (
+            <p className="text-[11px] text-muted mt-1">
+              Resolution target: <span className="font-medium">{slaConfig.sla_matrix[form.priority]}h</span> from now (SLA for {form.priority} priority).
+            </p>
+          )}
         </div>
 
         <div>
@@ -214,6 +357,16 @@ function IncidentDetail({ incident, onClose, staff, onUpdated }) {
     onClose();
   }
 
+  async function escalate() {
+    try {
+      await api.post(`/incidents/${incident.id}/escalate`, {});
+      onUpdated();
+      onClose();
+    } catch (e) {
+      alert(e.response?.data?.error || "Failed to escalate");
+    }
+  }
+
   async function addComment() {
     if (!body.trim()) return;
     await api.post(`/incidents/${incident.id}/comments`, { body });
@@ -226,11 +379,32 @@ function IncidentDetail({ incident, onClose, staff, onUpdated }) {
     <Modal open={!!incident} onClose={onClose} title={`#${incident.id} — ${incident.title}`}
       footer={<button className="btn-secondary" onClick={onClose}>Close</button>}>
       <div className="space-y-4">
-        <div className="flex gap-2 flex-wrap text-sm">
+        <div className="flex gap-2 flex-wrap text-sm items-center">
           <StatusBadge value={incident.status} />
           <StatusBadge value={incident.priority} />
           <span className="badge bg-slate-100 text-slate-700">{incident.category}</span>
+          <SlaBadge sla={incident.sla} />
+          <EscalationBadge level={incident.escalation_level} />
         </div>
+
+        {incident.sla?.due_at && (
+          <div className={`rounded-md border px-3 py-2 text-xs ${
+            incident.sla.state === "breached" ? "bg-red-50 border-red-200 text-red-800"
+              : incident.sla.state === "due_soon" ? "bg-amber-50 border-amber-200 text-amber-800"
+              : "bg-slate-50 border-slate-200 text-slate-600"}`}>
+            <span className="font-semibold">SLA:</span> {incident.sla.sla_hours}h target ·
+            {" "}due {incident.sla.due_at.slice(0, 16).replace("T", " ")} UTC
+            {incident.sla.hours_remaining != null && (
+              <> · {incident.sla.hours_remaining < 0
+                ? `overdue by ${Math.abs(incident.sla.hours_remaining)}h`
+                : `${incident.sla.hours_remaining}h remaining`}</>
+            )}
+            {incident.escalation_level > 0 && incident.escalated_at && (
+              <> · escalated to L{incident.escalation_level} on {incident.escalated_at.slice(0, 16).replace("T", " ")} UTC</>
+            )}
+          </div>
+        )}
+
         <p className="text-sm text-slate-600">{incident.description || "(no description)"}</p>
 
         {attachments.length > 0 && (
@@ -268,6 +442,14 @@ function IncidentDetail({ incident, onClose, staff, onUpdated }) {
                   <option value="">— select —</option>
                   {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
+              </div>
+            )}
+            {!["resolved", "closed"].includes(incident.status) && (
+              <div className="flex items-center gap-2 pt-1">
+                <button onClick={escalate} className="btn-secondary text-xs">
+                  ⏫ Escalate{incident.escalation_level > 0 ? ` (currently L${incident.escalation_level})` : ""}
+                </button>
+                <span className="text-[11px] text-muted">Bumps to the next tier and raises priority.</span>
               </div>
             )}
           </div>

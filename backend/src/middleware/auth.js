@@ -1,11 +1,14 @@
 const jwt = require("jsonwebtoken");
 const db = require("../db");
+const { trialExpired } = require("../plans");
 
 const SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
 function signToken(user) {
   return jwt.sign(
-    { id: user.id, role: user.role, apartment_id: user.apartment_id },
+    // organization_id is the human-readable Org ID (e.g. ORG001) per the BRD's
+    // JWT shape; apartment_id remains the numeric tenant key used for joins.
+    { id: user.id, role: user.role, apartment_id: user.apartment_id, organization_id: user.org_code || null },
     SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
@@ -23,23 +26,26 @@ function requireAuth(req, res, next) {
       .get(payload.id);
     if (!row || !row.active) return res.status(401).json({ error: "User disabled or removed" });
 
-    // Platform admins can scope a request to any tenant via the X-Org-Id
-    // header. This lets the platform UI "view as" any organization without
-    // a new login. Ignored for everyone else (no privilege escalation).
-    let effectiveApartmentId = row.apartment_id;
-    const orgHeader = req.headers["x-org-id"];
-    if (orgHeader && row.role === "super_admin") {
-      const requested = Number(orgHeader);
-      if (Number.isFinite(requested) && requested > 0) {
-        effectiveApartmentId = requested;
-      }
+    // A user is always bound to their own apartment. Cross-tenant "view as"
+    // impersonation was removed so the platform operator cannot read tenant data.
+    const org = row.apartment_id
+      ? db.prepare("SELECT org_code, plan, trial_ends_at FROM apartments WHERE id = ?").get(row.apartment_id)
+      : null;
+
+    // Hard trial gate: a logged-in user whose org trial has since expired is cut
+    // off mid-session. The `code` lets the client redirect to the contact screen.
+    if (org && trialExpired(org.plan, org.trial_ends_at)) {
+      return res.status(403).json({
+        error: "Your organization's free trial has ended. Please contact our sales team to reactivate your account.",
+        code: "trial_expired",
+      });
     }
 
     req.user = {
       id: row.id,
       role: row.role,
-      apartment_id: effectiveApartmentId,
-      real_apartment_id: row.apartment_id, // original, before impersonation
+      apartment_id: row.apartment_id,
+      organization_id: org?.org_code || null, // human-readable Org ID (e.g. ORG001)
       permissions: row.permissions,
     };
     next();

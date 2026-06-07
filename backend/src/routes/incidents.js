@@ -2,6 +2,20 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission, can, canAccessApartment } = require("../permissions");
+const {
+  SLA_MATRIX, PRIORITIES, ESCALATION_MATRIX, MAX_ESCALATION_LEVEL,
+  sanitizeMatrix, parseMatrix, defaultSlaHours, bumpPriority, slaStatus,
+} = require("../sla");
+const { notify, recipientsByRole, STAFF_ROLES } = require("../notifications");
+
+// Roles allowed to configure community SLA policy.
+const SLA_ADMIN_ROLES = ["org_admin", "committee"];
+
+// The SLA matrix in force for an organization (custom or default).
+function orgMatrix(apartmentId) {
+  const row = db.prepare("SELECT sla_config FROM apartments WHERE id = ?").get(apartmentId);
+  return parseMatrix(row?.sla_config);
+}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -26,9 +40,44 @@ function parseAttachments(raw) {
   } catch { return []; }
 }
 
-function decorate(rows) {
-  return rows.map((r) => ({ ...r, attachments: parseAttachments(r.attachments) }));
+// Attach parsed attachments and the computed SLA standing to a row.
+function decorateOne(r) {
+  return { ...r, attachments: parseAttachments(r.attachments), sla: slaStatus(r) };
 }
+function decorate(rows) {
+  return rows.map(decorateOne);
+}
+
+// Expose this org's SLA windows + escalation tiers, and whether the caller may edit.
+router.get("/sla/config", (req, res) => {
+  res.json({
+    sla_matrix: orgMatrix(req.user.apartment_id),
+    defaults: SLA_MATRIX,
+    escalation_matrix: ESCALATION_MATRIX,
+    editable: SLA_ADMIN_ROLES.includes(req.user.role),
+  });
+});
+
+// Update this org's per-priority SLA windows. Admin/committee only.
+router.put("/sla/config", (req, res) => {
+  if (!SLA_ADMIN_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ error: "Only an org admin or committee can change SLA settings" });
+  }
+  const incoming = req.body?.sla_matrix || req.body || {};
+  // Reject values outside the allowed range rather than silently clamping.
+  for (const p of PRIORITIES) {
+    if (incoming[p] !== undefined) {
+      const v = Number(incoming[p]);
+      if (!Number.isFinite(v) || v < 1 || v > 8760) {
+        return res.status(400).json({ error: `${p} SLA must be a whole number of hours between 1 and 8760` });
+      }
+    }
+  }
+  const matrix = sanitizeMatrix(incoming);
+  db.prepare("UPDATE apartments SET sla_config = ? WHERE id = ?")
+    .run(JSON.stringify(matrix), req.user.apartment_id);
+  res.json({ sla_matrix: matrix });
+});
 
 router.get("/", requirePermission("incidents", "view"), (req, res) => {
   const apId = req.user.apartment_id;
@@ -53,12 +102,36 @@ router.get("/", requirePermission("incidents", "view"), (req, res) => {
          i.created_at DESC`
     )
     .all(...params);
-  res.json({ incidents: decorate(incidents) });
+
+  let decorated = decorate(incidents);
+
+  // SLA standing summary across the (status/priority-filtered) set, computed
+  // before any breached-only narrowing so the banner reflects the real totals.
+  const summary = decorated.reduce(
+    (acc, i) => {
+      if (i.sla.state === "breached") acc.breached += 1;
+      else if (i.sla.state === "due_soon") acc.due_soon += 1;
+      if (i.escalation_level > 0) acc.escalated += 1;
+      return acc;
+    },
+    { breached: 0, due_soon: 0, escalated: 0, total: decorated.length }
+  );
+
+  // Optional view: only complaints currently breaching SLA.
+  if (req.query.breached === "1" || req.query.breached === "true") {
+    decorated = decorated.filter((i) => i.sla.state === "breached");
+  }
+
+  res.json({ incidents: decorated, summary });
 });
 
 router.post("/", requirePermission("incidents", "create"), (req, res) => {
-  const { category, title, description, priority = "medium", flat_id, sla_hours = 48, attachments } = req.body || {};
+  const { category, title, description, priority = "medium", flat_id, sla_hours, attachments } = req.body || {};
   if (!category || !title) return res.status(400).json({ error: "category and title required" });
+  // Default the SLA window from THIS ORG's priority matrix unless one is given explicitly.
+  const effectiveSla = sla_hours == null || sla_hours === ""
+    ? defaultSlaHours(priority, orgMatrix(req.user.apartment_id))
+    : Number(sla_hours);
   let resolvedFlatId = flat_id;
   if (!resolvedFlatId && req.user.role === "resident") {
     const f = db.prepare("SELECT id FROM flats WHERE owner_id = ?").get(req.user.id);
@@ -74,11 +147,21 @@ router.post("/", requirePermission("incidents", "create"), (req, res) => {
     )
     .run(
       req.user.apartment_id, resolvedFlatId || null, req.user.id,
-      category, title, description || null, priority, sla_hours,
+      category, title, description || null, priority, effectiveSla,
       cleanAttachments ? JSON.stringify(cleanAttachments) : null
     );
   const created = db.prepare("SELECT * FROM incidents WHERE id = ?").get(info.lastInsertRowid);
-  res.status(201).json({ incident: { ...created, attachments: parseAttachments(created.attachments) } });
+  // Notify the org's complaint-handling staff (not the person who raised it).
+  notify({
+    apartmentId: req.user.apartment_id,
+    userIds: recipientsByRole(req.user.apartment_id, STAFF_ROLES),
+    excludeUserId: req.user.id,
+    type: "complaint_raised",
+    title: "New complaint raised",
+    body: `${category}: ${title}`,
+    link: "/incidents",
+  });
+  res.status(201).json({ incident: decorateOne(created) });
 });
 
 router.patch("/:id", (req, res) => {
@@ -123,8 +206,62 @@ router.patch("/:id", (req, res) => {
     attachmentsJson === undefined ? null : 1, attachmentsJson === undefined ? null : attachmentsJson,
     id
   );
+  // Notify the resident who raised it when their complaint is marked resolved.
+  if (finalStatus === "resolved" && incident.status !== "resolved" && incident.raised_by) {
+    notify({
+      apartmentId: incident.apartment_id, userIds: [incident.raised_by], excludeUserId: req.user.id,
+      type: "complaint_resolved",
+      title: "Complaint resolved",
+      body: `Your complaint "${incident.title}" was marked resolved.`,
+      link: "/incidents",
+    });
+  }
+
   const updated = db.prepare("SELECT * FROM incidents WHERE id = ?").get(id);
-  res.json({ incident: { ...updated, attachments: parseAttachments(updated.attachments) } });
+  res.json({ incident: decorateOne(updated) });
+});
+
+// Escalate a complaint up the matrix (BRD Module 6). Bumps escalation_level,
+// stamps escalated_at, optionally raises priority a notch, and logs a comment.
+router.post("/:id/escalate", (req, res) => {
+  const id = Number(req.params.id);
+  const incident = db.prepare("SELECT * FROM incidents WHERE id = ?").get(id);
+  if (!incident) return res.status(404).json({ error: "Not found" });
+  if (!canAccessApartment(req.user, incident.apartment_id)) {
+    return res.status(403).json({ error: "Forbidden — cross-organization access denied" });
+  }
+  if (!can(req.user, "incidents", "edit")) {
+    return res.status(403).json({ error: "Forbidden — missing permission: incidents.edit" });
+  }
+  if (["resolved", "closed"].includes(incident.status)) {
+    return res.status(400).json({ error: "Cannot escalate a resolved or closed complaint" });
+  }
+  if (incident.escalation_level >= MAX_ESCALATION_LEVEL) {
+    return res.status(400).json({ error: "Already at the highest escalation level" });
+  }
+
+  const nextLevel = incident.escalation_level + 1;
+  const raisePriority = req.body?.raise_priority !== false; // default: also bump priority
+  const newPriority = raisePriority ? bumpPriority(incident.priority) : incident.priority;
+  const tier = ESCALATION_MATRIX.find((t) => t.level === nextLevel);
+  const now = new Date().toISOString();
+
+  const tx = db.transaction(() => {
+    db.prepare(
+      "UPDATE incidents SET escalation_level = ?, escalated_at = ?, priority = ? WHERE id = ?"
+    ).run(nextLevel, now, newPriority, id);
+    db.prepare(
+      "INSERT INTO incident_comments (incident_id, user_id, body) VALUES (?,?,?)"
+    ).run(
+      id, req.user.id,
+      `⏫ Escalated to level ${nextLevel} (${tier?.label || "next tier"})` +
+        (raisePriority && newPriority !== incident.priority ? ` · priority raised to ${newPriority}` : "")
+    );
+  });
+  tx();
+
+  const updated = db.prepare("SELECT * FROM incidents WHERE id = ?").get(id);
+  res.json({ incident: decorateOne(updated) });
 });
 
 router.get("/:id/comments", (req, res) => {

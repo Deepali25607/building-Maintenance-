@@ -3,8 +3,14 @@ const bcrypt = require("bcryptjs");
 const db = require("../db");
 const { requireAuth, requireRole, signToken } = require("../middleware/auth");
 const { isPlatformAdmin, requirePlatformAdmin, effectivePermissions } = require("../permissions");
+const { PLAN_LIST, planFor, isValidPlan, trialInfo, trialEndDate } = require("../plans");
 
 const router = express.Router();
+
+// Public plan catalog — the signup page (pre-auth) renders these for selection.
+router.get("/plans", (_req, res) => {
+  res.json({ plans: PLAN_LIST });
+});
 
 // Public branding endpoint — for the login screen, before auth.
 // Returns the most-recently-created apartment (in single-tenant demos, the only one).
@@ -46,10 +52,16 @@ router.post("/signup", (req, res) => {
   const taken = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
   if (taken) return res.status(409).json({ error: "An account with this email already exists" });
 
+  // Chosen subscription plan (defaults to the free trial). Invalid → trial.
+  const plan = isValidPlan(org.plan) ? org.plan : "trial";
+  const trialEndsAt = plan === "trial" ? trialEndDate() : null;
+
   const tx = db.transaction(() => {
-    const apInfo = db.prepare("INSERT INTO apartments (name, address, tagline) VALUES (?,?,?)")
-      .run(String(org.name).trim(), org.address?.trim() || null, org.tagline?.trim() || null);
+    const apInfo = db.prepare("INSERT INTO apartments (name, address, tagline, plan, trial_ends_at) VALUES (?,?,?,?,?)")
+      .run(String(org.name).trim(), org.address?.trim() || null, org.tagline?.trim() || null, plan, trialEndsAt);
     const apartmentId = apInfo.lastInsertRowid;
+    // Assign the unique, human-readable Organization ID (e.g. ORG001) from the new PK.
+    db.prepare("UPDATE apartments SET org_code = printf('ORG%03d', id) WHERE id = ?").run(apartmentId);
 
     const hash = bcrypt.hashSync(admin.password, 10);
     const userInfo = db.prepare(
@@ -69,11 +81,14 @@ router.post("/signup", (req, res) => {
   const user = db.prepare(
     "SELECT id, name, email, phone, role, apartment_id, avatar_url FROM users WHERE id = ?"
   ).get(result.userId);
-  const apartment = db.prepare("SELECT id, name, tagline, address FROM apartments WHERE id = ?")
-    .get(result.apartmentId);
+  const apartment = withPlan(
+    db.prepare("SELECT id, org_code, name, tagline, address, plan, trial_ends_at FROM apartments WHERE id = ?")
+      .get(result.apartmentId)
+  );
 
   const safe = {
     ...user,
+    org_code: apartment?.org_code || null,
     permissions: effectivePermissions(user),
     apartment,
   };
@@ -81,6 +96,14 @@ router.post("/signup", (req, res) => {
 });
 
 router.use(requireAuth);
+
+// Attach plan metadata (name + flat_limit) so the UI doesn't need its own copy
+// of the plan table. flat_limit null === unlimited. Includes trial standing.
+function withPlan(ap) {
+  if (!ap) return ap;
+  const p = planFor(ap.plan);
+  return { ...ap, plan: p.key, plan_name: p.name, flat_limit: p.flat_limit, ...(trialInfo(p.key, ap.trial_ends_at) || {}) };
+}
 
 router.get("/", (req, res) => {
   if (isPlatformAdmin(req.user)) {
@@ -97,27 +120,58 @@ router.get("/", (req, res) => {
                  WHERE an.apartment_id = a.id AND an.completed = 0) AS active_announcements
        FROM apartments a ORDER BY a.name`
     ).all();
-    return res.json({ apartments });
+    return res.json({ apartments: apartments.map(withPlan) });
   }
   const ap = db.prepare("SELECT * FROM apartments WHERE id = ?").get(req.user.apartment_id);
-  res.json({ apartments: ap ? [ap] : [] });
+  res.json({ apartments: ap ? [withPlan(ap)] : [] });
 });
 
 router.get("/mine", (req, res) => {
-  const ap = db.prepare("SELECT id, name, tagline, address FROM apartments WHERE id = ?")
+  const ap = db.prepare("SELECT id, org_code, name, tagline, address, plan, background_url, trial_ends_at FROM apartments WHERE id = ?")
     .get(req.user.apartment_id);
   if (!ap) return res.status(404).json({ error: "Apartment not found" });
-  res.json({ apartment: ap });
+  // Include current flat usage so an org admin can see headroom against the cap.
+  const used = db.prepare("SELECT COUNT(*) AS n FROM flats WHERE apartment_id = ?").get(req.user.apartment_id).n;
+  res.json({ apartment: { ...withPlan(ap), flat_count: used } });
 });
 
 // Creating a new organization is platform-admin-only — that's the SaaS
 // onboarding path. (Public signup endpoint comes in Phase 2.)
 router.post("/", requirePlatformAdmin, (req, res) => {
-  const { name, address, tagline } = req.body || {};
+  const { name, address, tagline, plan } = req.body || {};
   if (!name) return res.status(400).json({ error: "name required" });
-  const info = db.prepare("INSERT INTO apartments (name, address, tagline) VALUES (?,?,?)")
-    .run(name, address || null, tagline || null);
-  res.status(201).json({ apartment: db.prepare("SELECT * FROM apartments WHERE id = ?").get(info.lastInsertRowid) });
+  if (plan !== undefined && !isValidPlan(plan)) {
+    return res.status(400).json({ error: "Invalid subscription plan" });
+  }
+  const info = db.prepare("INSERT INTO apartments (name, address, tagline, plan) VALUES (?,?,?,?)")
+    .run(name, address || null, tagline || null, plan || "starter");
+  // Assign the unique Organization ID (e.g. ORG001) from the new PK.
+  db.prepare("UPDATE apartments SET org_code = printf('ORG%03d', id) WHERE id = ?").run(info.lastInsertRowid);
+  res.status(201).json({ apartment: withPlan(db.prepare("SELECT * FROM apartments WHERE id = ?").get(info.lastInsertRowid)) });
+});
+
+// Change an organization's subscription plan. Platform-admin only — plan/billing
+// is a SaaS-operator concern, not something a tenant can self-upgrade for free.
+router.patch("/:id/plan", requirePlatformAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const { plan } = req.body || {};
+  if (!isValidPlan(plan)) return res.status(400).json({ error: "Invalid subscription plan" });
+  const existing = db.prepare("SELECT id FROM apartments WHERE id = ?").get(id);
+  if (!existing) return res.status(404).json({ error: "Apartment not found" });
+
+  // Guard against downgrading below current usage — the cap would be violated.
+  const used = db.prepare("SELECT COUNT(*) AS n FROM flats WHERE apartment_id = ?").get(id).n;
+  const limit = planFor(plan).flat_limit;
+  if (limit !== null && used > limit) {
+    return res.status(409).json({
+      error: `Cannot switch to ${planFor(plan).name}: this org has ${used} flats, over the ${limit}-flat limit.`,
+    });
+  }
+
+  // Moving onto trial (re)starts the clock; any paid plan clears it.
+  const trialEndsAt = plan === "trial" ? trialEndDate() : null;
+  db.prepare("UPDATE apartments SET plan = ?, trial_ends_at = ? WHERE id = ?").run(plan, trialEndsAt, id);
+  res.json({ apartment: withPlan(db.prepare("SELECT * FROM apartments WHERE id = ?").get(id)) });
 });
 
 // Org admins can rename / re-tagline their own apartment; platform admin can do any.
@@ -131,7 +185,7 @@ router.patch("/:id", (req, res) => {
     return res.status(403).json({ error: "Only platform admin or this org's admin can update apartment" });
   }
 
-  const { name, tagline, address } = req.body || {};
+  const { name, tagline, address, background_url } = req.body || {};
   if (name !== undefined && !String(name).trim()) {
     return res.status(400).json({ error: "name cannot be empty" });
   }
@@ -139,16 +193,19 @@ router.patch("/:id", (req, res) => {
     `UPDATE apartments SET
        name = COALESCE(?, name),
        tagline = CASE WHEN ? IS NOT NULL THEN ? ELSE tagline END,
-       address = CASE WHEN ? IS NOT NULL THEN ? ELSE address END
+       address = CASE WHEN ? IS NOT NULL THEN ? ELSE address END,
+       background_url = CASE WHEN ? IS NOT NULL THEN ? ELSE background_url END
      WHERE id = ?`
   ).run(
     name ?? null,
     tagline === undefined ? null : 1, tagline === undefined ? null : (tagline || null),
     address === undefined ? null : 1, address === undefined ? null : (address || null),
+    // pass an empty string to CLEAR the background; undefined leaves it unchanged.
+    background_url === undefined ? null : 1, background_url === undefined ? null : (background_url || null),
     id
   );
-  const updated = db.prepare("SELECT id, name, tagline, address FROM apartments WHERE id = ?").get(id);
-  res.json({ apartment: updated });
+  const updated = db.prepare("SELECT id, org_code, name, tagline, address, plan, background_url FROM apartments WHERE id = ?").get(id);
+  res.json({ apartment: withPlan(updated) });
 });
 
 // Hard-delete an organization. Platform-admin-only. Foreign keys cascade

@@ -57,7 +57,8 @@ export function AuthProvider({ children }) {
 
   function can(module, action) {
     if (!user) return false;
-    if (user.role === "super_admin") return true;
+    // Platform operator (super_admin) has no tenant-data permissions — mirrors
+    // the backend. Their access is the Platform admin area only.
     const perms = user.permissions || {};
     if (perms._all) return true;
     return !!perms?.[module]?.[action];

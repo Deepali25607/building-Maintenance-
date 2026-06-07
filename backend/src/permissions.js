@@ -1,13 +1,16 @@
 const MODULES = [
   "users",
   "flats",
+  "towers",
   "bills",
   "incidents",
   "expenses",
   "vendors",
   "announcements",
+  "visitors",
   "reports",
   "theme",
+  "contact",
 ];
 const ACTIONS = ["view", "create", "edit", "delete"];
 
@@ -19,37 +22,53 @@ const ACTIONS = ["view", "create", "edit", "delete"];
 //                  only. Cannot cross tenants. Created via org signup.
 //   committee, treasurer, resident, maintenance — per-tenant scoped roles.
 const ROLE_DEFAULTS = {
-  super_admin: { _all: true },
+  // Platform operator. Deliberately has NO tenant-data permissions — their power
+  // is platform administration (orgs, subscriptions, plans), enforced separately
+  // via isPlatformAdmin / requirePlatformAdmin. This keeps residents' personal and
+  // financial data private from the SaaS operator (data isolation).
+  super_admin: {},
   org_admin: { _all: true },
   committee: {
     users: { view: true, create: true, edit: true },
     flats: { view: true, create: true, edit: true },
+    towers: { view: true, create: true, edit: true, delete: true },
     bills: { view: true, create: true, edit: true },
     incidents: { view: true, create: true, edit: true },
     expenses: { view: true, create: true, edit: true },
     vendors: { view: true, create: true, edit: true },
     announcements: { view: true, create: true, edit: true },
+    visitors: { view: true, create: true, edit: true, delete: true },
     reports: { view: true },
+    contact: { view: true },
   },
   treasurer: {
     users: { view: true },
     flats: { view: true },
+    towers: { view: true },
     bills: { view: true, create: true, edit: true },
     incidents: { view: true },
     expenses: { view: true, create: true, edit: true },
     vendors: { view: true, create: true, edit: true },
     announcements: { view: true },
+    visitors: { view: true },
     reports: { view: true },
+    contact: { view: true },
   },
   resident: {
     flats: { view: true },
     bills: { view: true },
     incidents: { view: true, create: true },
     announcements: { view: true },
+    // Residents see/approve visits to their own flat and can pre-register guests.
+    visitors: { view: true, create: true },
+    contact: { view: true },
   },
   maintenance: {
     incidents: { view: true, edit: true },
     announcements: { view: true },
+    // Gate/security staff: log visitors and run the check-in/out lifecycle.
+    visitors: { view: true, create: true, edit: true },
+    contact: { view: true },
   },
 };
 
@@ -67,7 +86,9 @@ function effectivePermissions(user) {
 
 function can(user, module, action) {
   if (!user) return false;
-  if (isPlatformAdmin(user)) return true;
+  // NOTE: platform admins are intentionally NOT granted blanket access here.
+  // They have no tenant-data permissions; platform powers go through
+  // isPlatformAdmin / requirePlatformAdmin instead.
   const perms = effectivePermissions(user);
   if (perms._all) return true;
   return !!perms?.[module]?.[action];
@@ -97,7 +118,8 @@ function isPlatformAdmin(user) {
 // asking whether the user can create resources in their own tenant).
 function canAccessApartment(user, apartmentId) {
   if (!user) return false;
-  if (isPlatformAdmin(user)) return true;
+  // Platform admins are NOT given access to tenant data — they belong to no
+  // apartment and must not read/write residents' records (data isolation).
   if (apartmentId == null) return true; // creating in own tenant
   return user.apartment_id === Number(apartmentId);
 }

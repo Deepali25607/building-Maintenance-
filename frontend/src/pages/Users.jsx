@@ -9,6 +9,7 @@ export default function Users() {
   const { can, user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [openNew, setOpenNew] = useState(false);
+  const [openImport, setOpenImport] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [permTarget, setPermTarget] = useState(null);
   const [meta, setMeta] = useState(null);
@@ -37,7 +38,10 @@ export default function Users() {
           <p className="text-slate-500 text-sm">Residents, committee, treasurer, and maintenance staff.</p>
         </div>
         {canCreateUsers && (
-          <button className="btn-primary" onClick={() => setOpenNew(true)}>+ Add user</button>
+          <div className="flex gap-2">
+            <button className="btn-secondary" onClick={() => setOpenImport(true)}>⬆ Import residents</button>
+            <button className="btn-primary" onClick={() => setOpenNew(true)}>+ Add user</button>
+          </div>
         )}
       </div>
 
@@ -79,6 +83,7 @@ export default function Users() {
       </div>
 
       <NewUser open={openNew} onClose={() => setOpenNew(false)} onCreated={load} meta={meta} />
+      <BulkImport open={openImport} onClose={() => setOpenImport(false)} onImported={load} />
       <EditUser
         target={editTarget}
         onClose={() => setEditTarget(null)}
@@ -178,6 +183,183 @@ function EditUser({ target, onClose, onSaved, canChangeRole, isSelf }) {
         {err && <div className="text-sm text-red-600">{err}</div>}
       </div>
     </Modal>
+  );
+}
+
+// ─── Bulk import ──────────────────────────────────────────────────────────
+
+// Minimal RFC-4180-ish CSV parser: handles quoted fields, escaped quotes ("")
+// and commas/newlines inside quotes. Returns an array of string arrays.
+function parseCsv(text) {
+  const rows = [];
+  let field = "", record = [], inQuotes = false, i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      }
+      field += c; i++; continue;
+    }
+    if (c === '"') { inQuotes = true; i++; continue; }
+    if (c === ",") { record.push(field); field = ""; i++; continue; }
+    if (c === "\r") { i++; continue; }
+    if (c === "\n") { record.push(field); rows.push(record); record = []; field = ""; i++; continue; }
+    field += c; i++;
+  }
+  if (field.length || record.length) { record.push(field); rows.push(record); }
+  return rows.filter((r) => r.some((x) => x.trim() !== ""));
+}
+
+const HEADER_ALIASES = {
+  name: "name", "full name": "name",
+  email: "email", "email id": "email", "e-mail": "email",
+  phone: "phone", mobile: "phone", contact: "phone", "contact number": "phone",
+  role: "role",
+  flat: "flat_number", "flat no": "flat_number", "flat number": "flat_number", flat_number: "flat_number", unit: "flat_number",
+  block: "block", wing: "block",
+  monthly_rate: "monthly_rate", "monthly rate": "monthly_rate", rate: "monthly_rate", maintenance: "monthly_rate",
+  password: "password",
+};
+
+const TEMPLATE = `name,email,phone,role,block,flat_number,monthly_rate
+Asha Rao,asha.rao@example.com,9876500001,resident,A,101,3500
+Vikram Shah,vikram.shah@example.com,9876500002,resident,A,102,3500
+Neha Gupta,neha.gupta@example.com,,resident,B,201,4000`;
+
+function csvToRows(text) {
+  const grid = parseCsv(text);
+  if (grid.length < 2) return { rows: [], headerError: grid.length === 1 ? "Add at least one data row below the header." : "" };
+  const headers = grid[0].map((h) => HEADER_ALIASES[h.trim().toLowerCase()] || null);
+  if (!headers.includes("name") || !headers.includes("email")) {
+    return { rows: [], headerError: "Header row must include at least 'name' and 'email' columns." };
+  }
+  const rows = grid.slice(1).map((cells) => {
+    const obj = {};
+    headers.forEach((key, idx) => { if (key) obj[key] = (cells[idx] ?? "").trim(); });
+    return obj;
+  });
+  return { rows, headerError: "" };
+}
+
+function BulkImport({ open, onClose, onImported }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+
+  const { rows, headerError } = open ? csvToRows(text) : { rows: [], headerError: "" };
+
+  function reset() { setText(""); setResult(null); setErr(""); }
+
+  async function submit() {
+    setErr(""); setBusy(true);
+    try {
+      const r = await api.post("/users/bulk-import", { rows });
+      setResult(r.data);
+      onImported?.();
+    } catch (e) {
+      setErr(e.response?.data?.error || "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copyCredentials() {
+    const created = (result?.results || []).filter((r) => r.status === "created" && r.temp_password);
+    const text = created.map((r) => `${r.email}\t${r.temp_password}`).join("\n");
+    navigator.clipboard?.writeText(text);
+  }
+
+  return (
+    <Modal open={open} onClose={() => { onClose(); reset(); }} title="Bulk import residents"
+      footer={result ? (
+        <>
+          <button className="btn-secondary" onClick={() => setResult(null)}>Import more</button>
+          <div className="flex-1" />
+          <button className="btn-primary" onClick={() => { onClose(); reset(); }}>Done</button>
+        </>
+      ) : (
+        <>
+          <button className="btn-secondary" onClick={() => { onClose(); reset(); }} disabled={busy}>Cancel</button>
+          <button className="btn-primary" onClick={submit} disabled={busy || rows.length === 0}>
+            {busy ? "Importing…" : `Import ${rows.length || ""} resident${rows.length === 1 ? "" : "s"}`}
+          </button>
+        </>
+      )}>
+      {result ? (
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto px-1 -mx-1">
+          <div className="grid grid-cols-3 gap-2 text-center text-sm">
+            <ResultStat label="Created" value={result.summary.created} tone="green" />
+            <ResultStat label="Skipped" value={result.summary.skipped} tone="amber" />
+            <ResultStat label="Failed" value={result.summary.failed} tone={result.summary.failed ? "red" : undefined} />
+          </div>
+          <div className="text-xs text-muted text-center">
+            {result.summary.flats_created} flats created · {result.summary.flats_linked} flats linked
+          </div>
+          {result.results.some((r) => r.status === "created" && r.temp_password) && (
+            <button className="btn-secondary text-xs w-full justify-center" onClick={copyCredentials}>
+              📋 Copy new logins (email + temp password)
+            </button>
+          )}
+          <div className="rounded-md border border-slate-200 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50">
+                <tr><th className="text-left px-2 py-1.5">#</th><th className="text-left px-2 py-1.5">Email</th>
+                  <th className="text-left px-2 py-1.5">Status</th><th className="text-left px-2 py-1.5">Temp password</th>
+                  <th className="text-left px-2 py-1.5">Note</th></tr>
+              </thead>
+              <tbody>
+                {result.results.map((r) => (
+                  <tr key={r.row} className="border-t border-slate-100">
+                    <td className="px-2 py-1.5">{r.row}</td>
+                    <td className="px-2 py-1.5">{r.email || "—"}</td>
+                    <td className="px-2 py-1.5">
+                      <span className={`badge ${r.status === "created" ? "bg-emerald-100 text-emerald-700" : r.status === "skipped" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>{r.status}</span>
+                    </td>
+                    <td className="px-2 py-1.5 font-mono">{r.temp_password || "—"}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{r.message || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">
+            Paste a CSV with a header row. Required columns: <span className="font-mono">name</span>, <span className="font-mono">email</span>.
+            Optional: <span className="font-mono">phone, role, block, flat_number, monthly_rate, password</span>.
+          </p>
+          <ul className="text-[11px] text-muted list-disc pl-4 space-y-0.5">
+            <li>Role defaults to <span className="font-mono">resident</span> (admins can't be bulk-created).</li>
+            <li>Leave <span className="font-mono">password</span> blank to auto-generate a temp password per resident.</li>
+            <li>If <span className="font-mono">flat_number</span> is given, the flat is created (or linked if it already exists, when vacant).</li>
+          </ul>
+          <button className="text-xs text-brand-700 hover:underline" onClick={() => setText(TEMPLATE)}>Load sample template</button>
+          <textarea className="input min-h-[160px] font-mono text-xs" value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="name,email,phone,role,block,flat_number,monthly_rate&#10;Asha Rao,asha@example.com,9876500001,resident,A,101,3500" />
+          {headerError ? (
+            <div className="text-sm text-amber-700">{headerError}</div>
+          ) : (
+            <div className="text-xs text-muted">{rows.length} row{rows.length === 1 ? "" : "s"} ready to import.</div>
+          )}
+          {err && <div className="text-sm text-red-600">{err}</div>}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function ResultStat({ label, value, tone }) {
+  const tones = { green: "text-emerald-600", amber: "text-amber-600", red: "text-red-600" };
+  return (
+    <div className="rounded-md bg-slate-50 px-2 py-2">
+      <div className={`text-xl font-bold ${tones[tone] || "text-slate-700"}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-muted">{label}</div>
+    </div>
   );
 }
 

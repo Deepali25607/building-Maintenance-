@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission } = require("../permissions");
+const { notify, allActiveUsers } = require("../notifications");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -52,6 +53,16 @@ router.post("/", requirePermission("announcements", "create"), (req, res) => {
        VALUES (?,?,?,?,?,?)`
     )
     .run(req.user.apartment_id, title, body, pinned ? 1 : 0, req.user.id, active_until || null);
+  // Notify everyone in the community (except the author) of the new announcement.
+  notify({
+    apartmentId: req.user.apartment_id,
+    userIds: allActiveUsers(req.user.apartment_id),
+    excludeUserId: req.user.id,
+    type: "announcement_published",
+    title: `📣 ${title}`,
+    body: body.length > 140 ? body.slice(0, 137) + "…" : body,
+    link: "/announcements",
+  });
   res.status(201).json({ id: info.lastInsertRowid });
 });
 

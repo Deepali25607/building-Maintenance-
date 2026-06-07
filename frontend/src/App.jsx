@@ -11,17 +11,29 @@ import Bills from "./pages/Bills.jsx";
 import Incidents from "./pages/Incidents.jsx";
 import Expenses from "./pages/Expenses.jsx";
 import Vendors from "./pages/Vendors.jsx";
+import Visitors from "./pages/Visitors.jsx";
 import Flats from "./pages/Flats.jsx";
+import Towers from "./pages/Towers.jsx";
 import Users from "./pages/Users.jsx";
 import Announcements from "./pages/Announcements.jsx";
 import Reports from "./pages/Reports.jsx";
+import Accounting from "./pages/Accounting.jsx";
 import ThemePage from "./pages/Theme.jsx";
 import Profile from "./pages/Profile.jsx";
+import Contact from "./pages/Contact.jsx";
+import AccountSuspended from "./pages/AccountSuspended.jsx";
 
 function Shell() {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
   return <Layout />;
+}
+
+// The platform operator has no community dashboard — send them to Platform admin.
+function Home() {
+  const { user } = useAuth();
+  if (user?.role === "super_admin") return <Navigate to="/platform" replace />;
+  return <Dashboard />;
 }
 
 export default function App() {
@@ -31,18 +43,23 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/account/suspended" element={<AccountSuspended />} />
         <Route element={<Shell />}>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<Home />} />
           <Route path="/bills"        element={<ProtectedRoute need={["bills","view"]}><Bills /></ProtectedRoute>} />
           <Route path="/incidents"    element={<ProtectedRoute need={["incidents","view"]}><Incidents /></ProtectedRoute>} />
           <Route path="/expenses"     element={<ProtectedRoute need={["expenses","view"]}><Expenses /></ProtectedRoute>} />
           <Route path="/vendors"      element={<ProtectedRoute need={["vendors","view"]}><Vendors /></ProtectedRoute>} />
+          <Route path="/visitors"     element={<ProtectedRoute need={["visitors","view"]}><Visitors /></ProtectedRoute>} />
           <Route path="/flats"        element={<ProtectedRoute need={["flats","view"]}><Flats /></ProtectedRoute>} />
+          <Route path="/towers"       element={<ProtectedRoute need={["towers","view"]}><Towers /></ProtectedRoute>} />
           <Route path="/users"        element={<ProtectedRoute need={["users","view"]}><Users /></ProtectedRoute>} />
           <Route path="/announcements" element={<ProtectedRoute need={["announcements","view"]}><Announcements /></ProtectedRoute>} />
           <Route path="/reports"      element={<ProtectedRoute need={["reports","view"]}><Reports /></ProtectedRoute>} />
+          <Route path="/accounting"   element={<ProtectedRoute need={["reports","view"]}><Accounting /></ProtectedRoute>} />
           <Route path="/theme"        element={<ProtectedRoute need={["theme","view"]}><ThemePage /></ProtectedRoute>} />
           <Route path="/profile"      element={<Profile />} />
+          <Route path="/contact"      element={<ProtectedRoute need={["contact","view"]}><Contact /></ProtectedRoute>} />
           <Route path="/platform"     element={<ProtectedRoute roles={["super_admin"]}><Platform /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

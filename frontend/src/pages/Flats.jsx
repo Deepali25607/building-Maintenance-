@@ -22,6 +22,8 @@ export default function Flats() {
   const canDelete = can("flats", "delete");
   const [flats, setFlats] = useState([]);
   const [owners, setOwners] = useState([]);
+  const [towers, setTowers] = useState([]);
+  const [org, setOrg] = useState(null); // current org's plan + flat cap
   const [flatForm, setFlatForm] = useState(null);
   const [detailId, setDetailId] = useState(null);
 
@@ -31,9 +33,21 @@ export default function Flats() {
   function loadOwners() {
     return api.get("/users").then((r) => setOwners(r.data.users.filter((u) => u.role === "resident")));
   }
-  useEffect(() => { load(); loadOwners(); }, []);
+  function loadTowers() {
+    // Residents can't view towers — skip silently so the dropdown is just empty.
+    api.get("/towers").then((r) => setTowers(r.data.towers || [])).catch(() => setTowers([]));
+  }
+  function loadOrg() {
+    // 404s for a platform admin not scoped to any org — fine, just skip the banner.
+    api.get("/apartments/mine").then((r) => setOrg(r.data.apartment)).catch(() => setOrg(null));
+  }
+  useEffect(() => { load(); loadOwners(); loadTowers(); loadOrg(); }, []);
 
-  function reloadAll() { load(); loadOwners(); }
+  const limit = org?.flat_limit ?? null; // null === unlimited
+  const used = flats.length;
+  const atLimit = limit !== null && used >= limit;
+
+  function reloadAll() { load(); loadOwners(); loadOrg(); }
 
   return (
     <div>
@@ -42,10 +56,27 @@ export default function Flats() {
           <h1 className="text-2xl font-bold">Flats</h1>
           <p className="text-slate-500 text-sm">Click any flat to view owner profile and payment history. Use ✏️ to edit.</p>
         </div>
-        {canCreate && (
-          <button className="btn-primary" onClick={() => setFlatForm({ mode: "create" })}>+ Add flat</button>
-        )}
+        <div className="flex items-center gap-3">
+          {org?.plan_name && (
+            <span className={`text-xs px-2.5 py-1 rounded-full border ${atLimit ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-600"}`}>
+              {used} / {limit === null ? "∞" : limit} flats · {org.plan_name}
+            </span>
+          )}
+          {canCreate && (
+            <button className="btn-primary" onClick={() => setFlatForm({ mode: "create" })}
+              disabled={atLimit}
+              title={atLimit ? "Flat limit reached for this plan" : ""}>
+              + Add flat
+            </button>
+          )}
+        </div>
       </div>
+      {atLimit && (
+        <div className="mb-4 p-3 rounded bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          You've reached the {limit}-flat limit of the <span className="font-semibold">{org.plan_name}</span> plan.
+          Contact the platform administrator to upgrade and add more flats.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {flats.length === 0 && (
@@ -65,6 +96,7 @@ export default function Flats() {
         state={flatForm}
         onClose={() => setFlatForm(null)}
         owners={owners}
+        towers={towers}
         onSaved={reloadAll}
         canDelete={canDelete}
       />
@@ -111,6 +143,9 @@ function FlatTile({ flat, onOpen, onEdit }) {
             <div className="font-bold text-lg group-hover:text-brand-700">
               {flat.block ? `${flat.block}-` : ""}{flat.flat_number}
             </div>
+            {flat.tower_name && (
+              <div className="text-[11px] text-brand-600 truncate">🏗️ {flat.tower_name}</div>
+            )}
             <div className="text-xs text-slate-500 truncate">
               {flat.owner_name || <span className="italic text-slate-400">vacant</span>}
             </div>
@@ -228,7 +263,7 @@ function AvatarUploader({ value, name, onChange }) {
   );
 }
 
-function FlatFormModal({ state, onClose, owners, onSaved, canDelete }) {
+function FlatFormModal({ state, onClose, owners, towers = [], onSaved, canDelete }) {
   const mode = state?.mode;
   const existing = state?.flat;
   const [flatForm, setFlatForm] = useState({});
@@ -251,6 +286,7 @@ function FlatFormModal({ state, onClose, owners, onSaved, canDelete }) {
         area_sqft: existing.area_sqft ?? "",
         monthly_rate: existing.monthly_rate ?? 0,
         opening_balance: existing.opening_balance ?? 0,
+        tower_id: existing.tower_id ?? "",
       });
       if (existing.owner_id) {
         setOwnerMode("existing");
@@ -261,7 +297,7 @@ function FlatFormModal({ state, onClose, owners, onSaved, canDelete }) {
         setProfile(EMPTY_PROFILE);
       }
     } else {
-      setFlatForm({ block: "A", flat_number: "", floor: "", area_sqft: "", monthly_rate: 3500, opening_balance: 0 });
+      setFlatForm({ block: "A", flat_number: "", floor: "", area_sqft: "", monthly_rate: 3500, opening_balance: 0, tower_id: "" });
       setOwnerMode("vacant");
       setOwnerId("");
       setProfile(EMPTY_PROFILE);
@@ -363,6 +399,7 @@ function FlatFormModal({ state, onClose, owners, onSaved, canDelete }) {
         area_sqft: flatForm.area_sqft === "" ? null : Number(flatForm.area_sqft),
         monthly_rate: Number(flatForm.monthly_rate),
         opening_balance: flatForm.opening_balance === "" ? 0 : Number(flatForm.opening_balance) || 0,
+        tower_id: flatForm.tower_id === "" ? null : Number(flatForm.tower_id),
         owner_id: resolvedOwnerId,
       };
       if (mode === "edit") {
@@ -426,6 +463,17 @@ function FlatFormModal({ state, onClose, owners, onSaved, canDelete }) {
         <section>
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Flat details</div>
           <div className="space-y-3">
+            <div>
+              <label className="label">Tower</label>
+              <select className="input" value={flatForm.tower_id ?? ""}
+                onChange={(e) => setFlatForm({ ...flatForm, tower_id: e.target.value })}>
+                <option value="">— no tower —</option>
+                {towers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              {towers.length === 0 && (
+                <p className="text-[11px] text-muted mt-1">No towers defined yet. Add them on the Towers page to group flats.</p>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Block</label>
@@ -685,6 +733,7 @@ function FlatInfoPublic({ flat }) {
     <div>
       <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Flat details</div>
       <div className="grid grid-cols-3 gap-3">
+        <Cell label="Tower" value={flat.tower_name || "—"} />
         <Cell label="Block" value={flat.block || "—"} />
         <Cell label="Flat no." value={flat.flat_number} />
         <Cell label="Floor" value={flat.floor || "—"} />
@@ -784,6 +833,7 @@ function FlatInfo({ flat, totals }) {
     <div>
       <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Flat details</div>
       <div className="grid grid-cols-3 gap-3">
+        <Cell label="Tower" value={flat.tower_name || "—"} />
         <Cell label="Block" value={flat.block || "—"} />
         <Cell label="Flat no." value={flat.flat_number} />
         <Cell label="Floor" value={flat.floor || "—"} />

@@ -12,8 +12,9 @@ export default function ThemePage() {
 
   // Theme picker (apply preset/custom) — gated by theme.edit permission
   const canEditTheme = can("theme", "edit");
-  // Apartment name/tagline — still super_admin only (separate /api/apartments PATCH gate)
-  const canEditBranding = user?.role === "super_admin";
+  // Name/tagline/background — the community (org) admin manages these. The
+  // platform operator no longer belongs to a community, so it's not them.
+  const canEditBranding = canEditTheme;
 
   useEffect(() => () => restore(), []); // restore on unmount
 
@@ -52,7 +53,8 @@ export default function ThemePage() {
 
       {canEditBranding && user?.apartment && (
         <BrandingEditor apartmentId={user.apartment.id}
-          initial={{ name: user.apartment.name, tagline: user.apartment.tagline }}
+          orgCode={user.apartment.org_code}
+          initial={{ name: user.apartment.name, tagline: user.apartment.tagline, background_url: user.apartment.background_url }}
           onSaved={refreshUser} />
       )}
 
@@ -145,12 +147,49 @@ export default function ThemePage() {
   );
 }
 
-function BrandingEditor({ apartmentId, initial, onSaved }) {
+function BrandingEditor({ apartmentId, orgCode, initial, onSaved }) {
   const [name, setName] = useState(initial.name || "");
   const [tagline, setTagline] = useState(initial.tagline || "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  const [bg, setBg] = useState(initial.background_url || "");
+  const [bgBusy, setBgBusy] = useState(false);
+  const [bgErr, setBgErr] = useState("");
+
+  // Background changes save immediately so the whole app updates on the spot.
+  async function pickBackground(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBgBusy(true); setBgErr("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const up = await api.post("/uploads/background", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      await api.patch(`/apartments/${apartmentId}`, { background_url: up.data.url });
+      setBg(up.data.url);
+      await onSaved?.();
+    } catch (e2) {
+      setBgErr(e2.response?.data?.error || "Upload failed");
+    } finally {
+      setBgBusy(false);
+      e.target.value = "";
+    }
+  }
+
+  async function removeBackground() {
+    setBgBusy(true); setBgErr("");
+    try {
+      await api.patch(`/apartments/${apartmentId}`, { background_url: "" });
+      setBg("");
+      await onSaved?.();
+    } catch (e2) {
+      setBgErr(e2.response?.data?.error || "Failed to remove");
+    } finally {
+      setBgBusy(false);
+    }
+  }
 
   const dirty = name !== (initial.name || "") || tagline !== (initial.tagline || "");
 
@@ -184,6 +223,13 @@ function BrandingEditor({ apartmentId, initial, onSaved }) {
         <div>
           <div className="text-xs uppercase tracking-wide text-muted">Community branding</div>
           <h2 className="font-display text-xl font-semibold">Apartment identity</h2>
+          {orgCode && (
+            <div className="text-[11px] text-muted mt-1">
+              Organization ID:{" "}
+              <span className="font-mono text-slate-700">{orgCode}</span>
+              <span className="text-muted"> · permanent, cannot be changed</span>
+            </div>
+          )}
         </div>
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-[0.2em] text-accent">{tagline || "—"}</div>
@@ -219,6 +265,34 @@ function BrandingEditor({ apartmentId, initial, onSaved }) {
       <p className="text-[11px] text-muted mt-2">
         The name appears in the sidebar header, the login screen, and across resident emails. The tagline is the small accent line above the name.
       </p>
+
+      <div className="mt-5 pt-4 border-t border-line">
+        <div className="text-xs uppercase tracking-wide text-muted">Appearance</div>
+        <h3 className="font-display text-base font-semibold mb-2">App background image</h3>
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="w-44 h-24 rounded-md border border-line overflow-hidden bg-surface-2 flex items-center justify-center text-xs text-muted shrink-0">
+            {bg ? <img src={bg} alt="background preview" className="w-full h-full object-cover" /> : "No image"}
+          </div>
+          <div className="min-w-0">
+            <label className="btn-secondary text-xs cursor-pointer">
+              {bgBusy ? "Uploading…" : (bg ? "Change image" : "Upload image")}
+              <input type="file" accept="image/png,image/jpeg,image/gif,image/webp"
+                className="hidden" onChange={pickBackground} disabled={bgBusy} />
+            </label>
+            {bg && (
+              <button type="button" onClick={removeBackground} disabled={bgBusy}
+                className="ml-2 text-xs text-muted hover:text-red-600 hover:underline">
+                Remove
+              </button>
+            )}
+            <p className="text-[11px] text-muted mt-1 max-w-sm">
+              Displayed across the whole app for everyone in your community, with a subtle theme overlay
+              so text stays readable in light and dark mode. PNG/JPG/GIF/WEBP, up to 10MB.
+            </p>
+            {bgErr && <p className="text-[11px] text-red-600 mt-1">{bgErr}</p>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
