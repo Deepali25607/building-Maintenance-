@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../api/client.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import AuthBackground from "../components/AuthBackground.jsx";
 
 export default function Signup() {
   const nav = useNavigate();
@@ -67,8 +68,8 @@ export default function Signup() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-50 via-page to-brand-100 p-4">
-      <div className="card w-full max-w-xl p-6 sm:p-8 my-8">
+    <AuthBackground>
+      <div className="card w-full max-w-xl p-6 sm:p-8 my-8 shadow-xl ring-1 ring-white/60 backdrop-blur-xl bg-surface/80">
         <div className="text-[10px] uppercase tracking-[0.25em] text-accent">Start your community</div>
         <h1 className="font-display text-3xl font-semibold text-brand-700 leading-tight">Create your organization</h1>
         <p className="text-muted text-sm mb-6">
@@ -184,6 +185,6 @@ export default function Signup() {
           </p>
         </form>
       </div>
-    </div>
+    </AuthBackground>
   );
 }

@@ -28,9 +28,19 @@ module.exports = {
           "0%": { transform: "translateX(0)" },
           "100%": { transform: "translateX(-50%)" },
         },
+        float: {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "50%": { transform: "translate(20px, -30px) scale(1.05)" },
+        },
+        "float-slow": {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "50%": { transform: "translate(-25px, 25px) scale(1.08)" },
+        },
       },
       animation: {
         marquee: "marquee 40s linear infinite",
+        float: "float 16s ease-in-out infinite",
+        "float-slow": "float-slow 22s ease-in-out infinite",
       },
     },
   },

@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import api from "../api/client.js";
+import AuthBackground from "../components/AuthBackground.jsx";
 
 const DEMO = [
-  { role: "Platform Admin", email: "platform@demo.com", pw: "platform123" },
   { role: "Org Admin",      email: "admin@demo.com",    pw: "admin123" },
   { role: "Committee",      email: "priya@demo.com",    pw: "priya123" },
   { role: "Treasurer",      email: "rahul@demo.com",    pw: "rahul123" },
@@ -38,8 +38,8 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-50 via-page to-brand-100 p-4">
-      <div className="card w-full max-w-md p-8">
+    <AuthBackground>
+      <div className="card w-full max-w-md p-8 shadow-xl ring-1 ring-white/60 backdrop-blur-xl bg-surface/80">
         <div className="text-[10px] uppercase tracking-[0.25em] text-accent">{branding.tagline}</div>
         <h1 className="font-display text-3xl font-semibold text-brand-700 leading-tight">{branding.name}</h1>
         <p className="text-muted mb-6 text-sm">Apartment Community Portal</p>
@@ -82,6 +82,6 @@ export default function Login() {
           </div>
         </div>
       </div>
-    </div>
+    </AuthBackground>
   );
 }
