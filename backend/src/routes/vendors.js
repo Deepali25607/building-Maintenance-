@@ -2,9 +2,11 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission } = require("../permissions");
+const { requireFeature } = require("../features");
 
 const router = express.Router();
 router.use(requireAuth);
+router.use(requireFeature("vendors"));
 
 router.get("/", requirePermission("vendors", "view"), (req, res) => {
   const vendors = db

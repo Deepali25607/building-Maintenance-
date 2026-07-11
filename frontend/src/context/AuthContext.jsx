@@ -64,8 +64,18 @@ export function AuthProvider({ children }) {
     return !!perms?.[module]?.[action];
   }
 
+  // Whether the user's organization has a given feature enabled (plan default +
+  // platform-admin overrides — see backend/src/features.js). Mirrors the resolved
+  // map the backend ships on user.apartment.features. Default-allow when the map
+  // is absent (e.g. the platform operator, who has no apartment).
+  function hasFeature(key) {
+    const f = user?.apartment?.features;
+    if (!f) return true;
+    return f[key] !== false;
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, can, refreshUser, setAfterSignup }}>
+    <AuthContext.Provider value={{ user, login, logout, loading, can, hasFeature, refreshUser, setAfterSignup }}>
       {children}
     </AuthContext.Provider>
   );

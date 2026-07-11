@@ -17,15 +17,16 @@ const NAV = [
   { to: "/", label: "Dashboard", icon: "📊", hideForPlatform: true }, // org dashboard — not for the platform operator
   { to: "/bills", label: "Maintenance Bills", icon: "💳", need: ["bills", "view"] },
   { to: "/incidents", label: "Incidents", icon: "🛠", need: ["incidents", "view"] },
-  { to: "/expenses", label: "Expenses", icon: "💸", need: ["expenses", "view"] },
-  { to: "/vendors", label: "Vendors", icon: "🤝", need: ["vendors", "view"] },
-  { to: "/visitors", label: "Visitors", icon: "🚶", need: ["visitors", "view"] },
-  { to: "/towers", label: "Towers", icon: "🏗️", need: ["towers", "view"] },
+  { to: "/expenses", label: "Expenses", icon: "💸", need: ["expenses", "view"], feature: "expenses" },
+  { to: "/vendors", label: "Vendors", icon: "🤝", need: ["vendors", "view"], feature: "vendors" },
+  { to: "/visitors", label: "Visitors", icon: "🚶", need: ["visitors", "view"], feature: "visitors" },
+  { to: "/staff", label: "Daily Staff", icon: "🧹", need: ["staff", "view"], feature: "staff" },
+  { to: "/towers", label: "Towers", icon: "🏗️", need: ["towers", "view"], feature: "towers" },
   { to: "/flats", label: "Flats", icon: "🏢", need: ["flats", "view"] },
   { to: "/users", label: "Users", icon: "👥", need: ["users", "view"] },
   { to: "/announcements", label: "Announcements", icon: "📣", need: ["announcements", "view"] },
-  { to: "/accounting", label: "Accounting", icon: "💰", need: ["reports", "view"] },
-  { to: "/reports", label: "Reports", icon: "📈", need: ["reports", "view"] },
+  { to: "/accounting", label: "Accounting", icon: "💰", need: ["reports", "view"], feature: "accounting" },
+  { to: "/reports", label: "Reports", icon: "📈", need: ["reports", "view"], feature: "reports" },
   { to: "/theme", label: "Theme", icon: "🎨", need: ["theme", "view"] },
   { to: "/contact", label: "Help & Contact", icon: "💬", need: ["contact", "view"] }, // reach the platform team
   { to: "/profile", label: "My Profile", icon: "👤" }, // always visible — self-service
@@ -33,17 +34,21 @@ const NAV = [
 ];
 
 export default function Layout() {
-  const { user, logout, can } = useAuth();
+  const { user, logout, can, hasFeature } = useAuth();
   const { mode, toggleMode } = useTheme();
   const nav = useNavigate();
   const location = useLocation();
   const isPlatformAdmin = user?.role === "super_admin";
-  const items = NAV.filter((i) => {
-    if (i.platformOnly) return isPlatformAdmin;
-    if (i.hideForPlatform && isPlatformAdmin) return false;
-    if (i.need) return can(i.need[0], i.need[1]);
-    return true;
-  });
+  const items = NAV
+    .filter((i) => {
+      if (i.platformOnly) return isPlatformAdmin;
+      if (i.hideForPlatform && isPlatformAdmin) return false;
+      if (i.need) return can(i.need[0], i.need[1]);
+      return true;
+    })
+    // Keep feature-locked items visible (dimmed + 🔒) to drive plan upgrades —
+    // clicking still routes to the page, which shows the upgrade prompt.
+    .map((i) => ({ ...i, locked: !!(i.feature && !hasFeature(i.feature)) }));
 
   // Mobile drawer state — desktop ignores this and keeps sidebar always-on.
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -84,7 +89,7 @@ export default function Layout() {
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <NotificationBell align={isRight ? "right" : "left"} />
+          {hasFeature("notifications") && <NotificationBell align={isRight ? "right" : "left"} />}
           <button onClick={toggleMode}
             title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             className="w-8 h-8 rounded-full border border-line hover:bg-surface-2 flex items-center justify-center text-base shrink-0">
@@ -98,13 +103,15 @@ export default function Layout() {
             key={i.to}
             to={i.to}
             end={i.to === "/"}
+            title={i.locked ? "Not included in your plan — upgrade to unlock" : undefined}
             className={({ isActive }) =>
               `flex items-center gap-2 px-3 py-2 rounded text-sm ${
                 isActive ? "bg-brand-50 text-brand-700 font-medium" : "text-fg/80 hover:bg-surface-2"
-              }`
+              } ${i.locked ? "opacity-55" : ""}`
             }
           >
-            <span>{i.icon}</span> <span>{i.label}</span>
+            <span>{i.icon}</span> <span className="flex-1">{i.label}</span>
+            {i.locked && <span className="text-xs" aria-label="locked">🔒</span>}
           </NavLink>
         ))}
       </nav>
@@ -169,7 +176,7 @@ export default function Layout() {
               {user?.apartment?.name || "Apartment Community"}
             </div>
           </div>
-          <NotificationBell />
+          {hasFeature("notifications") && <NotificationBell />}
           <button onClick={toggleMode}
             title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             className="w-9 h-9 rounded-full border border-line hover:bg-surface-2 flex items-center justify-center text-base shrink-0">
@@ -194,8 +201,8 @@ export default function Layout() {
         </div>
       </main>
 
-      {/* Always-available support assistant for organization admins. */}
-      {user?.role === "org_admin" && <ChatbotWidget />}
+      {/* Support assistant for organization admins — gated by the chatbot feature. */}
+      {user?.role === "org_admin" && hasFeature("chatbot") && <ChatbotWidget />}
     </div>
   );
 }

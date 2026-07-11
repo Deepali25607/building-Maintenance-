@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission, can, canAccessApartment } = require("../permissions");
+const { requireFeature } = require("../features");
 const {
   SLA_MATRIX, PRIORITIES, ESCALATION_MATRIX, MAX_ESCALATION_LEVEL,
   sanitizeMatrix, parseMatrix, defaultSlaHours, bumpPriority, slaStatus,
@@ -49,7 +50,7 @@ function decorate(rows) {
 }
 
 // Expose this org's SLA windows + escalation tiers, and whether the caller may edit.
-router.get("/sla/config", (req, res) => {
+router.get("/sla/config", requireFeature("sla"), (req, res) => {
   res.json({
     sla_matrix: orgMatrix(req.user.apartment_id),
     defaults: SLA_MATRIX,
@@ -59,7 +60,7 @@ router.get("/sla/config", (req, res) => {
 });
 
 // Update this org's per-priority SLA windows. Admin/committee only.
-router.put("/sla/config", (req, res) => {
+router.put("/sla/config", requireFeature("sla"), (req, res) => {
   if (!SLA_ADMIN_ROLES.includes(req.user.role)) {
     return res.status(403).json({ error: "Only an org admin or committee can change SLA settings" });
   }
@@ -223,7 +224,7 @@ router.patch("/:id", (req, res) => {
 
 // Escalate a complaint up the matrix (BRD Module 6). Bumps escalation_level,
 // stamps escalated_at, optionally raises priority a notch, and logs a comment.
-router.post("/:id/escalate", (req, res) => {
+router.post("/:id/escalate", requireFeature("sla"), (req, res) => {
   const id = Number(req.params.id);
   const incident = db.prepare("SELECT * FROM incidents WHERE id = ?").get(id);
   if (!incident) return res.status(404).json({ error: "Not found" });

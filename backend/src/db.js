@@ -205,6 +205,53 @@ function migrate() {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Smart Daily Visitor Management: RECURRING service providers (maids, cooks,
+    -- drivers, milkmen…) as opposed to one-time guests in the visitors table. Each staff
+    -- member can serve several flats. face_descriptor holds a 128-float JSON
+    -- vector computed in the browser at enrollment (face-api.js) — no raw
+    -- biometric image is stored; matching is done server-side, tenant-scoped.
+    CREATE TABLE IF NOT EXISTS staff (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      apartment_id INTEGER NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
+      phone TEXT,
+      address TEXT,
+      id_proof TEXT,
+      photo_url TEXT,
+      face_descriptor TEXT,
+      face_enrolled_at TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      notes TEXT,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Which flats a staff member works in — drives resident visibility and
+    -- check-in/out notifications to the flats' owners.
+    CREATE TABLE IF NOT EXISTS staff_flats (
+      staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+      flat_id INTEGER NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+      PRIMARY KEY (staff_id, flat_id)
+    );
+
+    -- One row per gate visit (IN..OUT session). The date column is the server-local day
+    -- so a 5am milk delivery groups under the right day; timestamps stay UTC
+    -- like the rest of the app. out_at NULL = currently inside.
+    CREATE TABLE IF NOT EXISTS staff_attendance (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      apartment_id INTEGER NOT NULL REFERENCES apartments(id) ON DELETE CASCADE,
+      staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      in_at TEXT NOT NULL DEFAULT (datetime('now')),
+      out_at TEXT,
+      in_method TEXT NOT NULL DEFAULT 'manual' CHECK (in_method IN ('face','manual')),
+      out_method TEXT CHECK (out_method IN ('face','manual')),
+      in_confidence REAL,
+      out_confidence REAL,
+      marked_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+    );
+
     -- Inbound enquiries from tenants — contact form, chatbot escalation, or the
     -- trial-block screen. The platform admin reads these from the Platform area.
     CREATE TABLE IF NOT EXISTS contact_messages (
@@ -258,6 +305,13 @@ ensureColumn("apartments", "trial_ends_at", "TEXT");
 // Per-organization SLA windows by priority (JSON, e.g. {"urgent":4,...}).
 // NULL falls back to the global defaults in backend/src/sla.js.
 ensureColumn("apartments", "sla_config", "TEXT");
+// Per-organization feature overrides (JSON, sparse, e.g. {"accounting":true}).
+// Layered on top of the plan's default feature set. NULL = pure plan defaults.
+// See backend/src/features.js.
+ensureColumn("apartments", "features", "TEXT");
+// Org-defined staff service types (JSON array of {key,label,icon}) layered on
+// top of the built-in list in routes/staff.js.
+ensureColumn("apartments", "staff_categories", "TEXT");
 ensureColumn("incidents", "attachments", "TEXT");
 // Escalation matrix tracking (BRD Module 6). Level 0 = not escalated; each
 // escalation bumps the level and stamps escalated_at. See backend/src/sla.js.
@@ -327,6 +381,10 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user
 // Visitor lookups: by org/status for the gate log, by host for a resident's feed.
 db.exec("CREATE INDEX IF NOT EXISTS idx_visitors_org ON visitors(apartment_id, status, created_at)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_visitors_host ON visitors(host_user_id, status)");
+// Staff attendance: daily register per org, per-staff history, face-match candidates.
+db.exec("CREATE INDEX IF NOT EXISTS idx_staff_org ON staff(apartment_id, active)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_staff_att_day ON staff_attendance(apartment_id, date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_staff_att_staff ON staff_attendance(staff_id, date)");
 
 // WhatsApp business number for the chatbot "Chat on WhatsApp" hand-off (added later).
 ensureColumn("platform_settings", "whatsapp_number", "TEXT");

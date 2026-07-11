@@ -2,9 +2,11 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission, isPlatformAdmin, canAccessApartment } = require("../permissions");
+const { requireFeature } = require("../features");
 
 const router = express.Router();
 router.use(requireAuth);
+router.use(requireFeature("towers"));
 
 // Each tower is enriched with how many flats reference it, plus the distinct
 // floors actually in use — handy for the structure overview.

@@ -331,7 +331,7 @@ function NewIncident({ open, onClose, categories, slaConfig, onCreated }) {
 }
 
 function IncidentDetail({ incident, onClose, staff, onUpdated }) {
-  const { user } = useAuth();
+  const { user, hasFeature } = useAuth();
   const [comments, setComments] = useState([]);
   const [body, setBody] = useState("");
   const [lightboxSrc, setLightboxSrc] = useState(null);
@@ -444,7 +444,7 @@ function IncidentDetail({ incident, onClose, staff, onUpdated }) {
                 </select>
               </div>
             )}
-            {!["resolved", "closed"].includes(incident.status) && (
+            {hasFeature("sla") && !["resolved", "closed"].includes(incident.status) && (
               <div className="flex items-center gap-2 pt-1">
                 <button onClick={escalate} className="btn-secondary text-xs">
                   ⏫ Escalate{incident.escalation_level > 0 ? ` (currently L${incident.escalation_level})` : ""}

@@ -4,6 +4,10 @@ const db = require("../db");
 const { requireAuth, requireRole, signToken } = require("../middleware/auth");
 const { isPlatformAdmin, requirePlatformAdmin, effectivePermissions } = require("../permissions");
 const { PLAN_LIST, planFor, isValidPlan, trialInfo, trialEndDate } = require("../plans");
+const {
+  FEATURE_CATALOG, isValidFeature, isCoreFeature, parseFeatures,
+  effectiveFeatures, hasFeature,
+} = require("../features");
 
 const router = express.Router();
 
@@ -102,7 +106,15 @@ router.use(requireAuth);
 function withPlan(ap) {
   if (!ap) return ap;
   const p = planFor(ap.plan);
-  return { ...ap, plan: p.key, plan_name: p.name, flat_limit: p.flat_limit, ...(trialInfo(p.key, ap.trial_ends_at) || {}) };
+  return {
+    ...ap,
+    plan: p.key,
+    plan_name: p.name,
+    flat_limit: p.flat_limit,
+    // Resolved feature map (plan defaults + per-org overrides) for the client.
+    features: effectiveFeatures(p.key, ap.features),
+    ...(trialInfo(p.key, ap.trial_ends_at) || {}),
+  };
 }
 
 router.get("/", (req, res) => {
@@ -124,6 +136,12 @@ router.get("/", (req, res) => {
   }
   const ap = db.prepare("SELECT * FROM apartments WHERE id = ?").get(req.user.apartment_id);
   res.json({ apartments: ap ? [withPlan(ap)] : [] });
+});
+
+// The feature catalog — what features exist, their category and whether they are
+// core (always-on). Used by the Platform admin UI to render per-org toggles.
+router.get("/features-catalog", (_req, res) => {
+  res.json({ features: FEATURE_CATALOG });
 });
 
 router.get("/mine", (req, res) => {
@@ -174,6 +192,41 @@ router.patch("/:id/plan", requirePlatformAdmin, (req, res) => {
   res.json({ apartment: withPlan(db.prepare("SELECT * FROM apartments WHERE id = ?").get(id)) });
 });
 
+// Override an organization's feature toggles on top of its plan defaults.
+// Platform-admin only — enabling/disabling functionality is a SaaS-operator
+// concern. Body: { features: { <key>: true | false | null } } where null RESETS
+// the key back to the plan default. Overrides persist across plan changes and
+// simply layer on the new plan's defaults.
+router.patch("/:id/features", requirePlatformAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare("SELECT id, features FROM apartments WHERE id = ?").get(id);
+  if (!existing) return res.status(404).json({ error: "Apartment not found" });
+
+  const incoming = req.body?.features;
+  if (!incoming || typeof incoming !== "object") {
+    return res.status(400).json({ error: "features object is required" });
+  }
+
+  const overrides = parseFeatures(existing.features) || {};
+  for (const [key, val] of Object.entries(incoming)) {
+    if (!isValidFeature(key)) {
+      return res.status(400).json({ error: `Unknown feature: ${key}` });
+    }
+    if (isCoreFeature(key)) {
+      return res.status(400).json({ error: `Core feature cannot be changed: ${key}` });
+    }
+    if (val === null) {
+      delete overrides[key]; // reset to plan default
+    } else {
+      overrides[key] = !!val;
+    }
+  }
+
+  const next = Object.keys(overrides).length ? JSON.stringify(overrides) : null;
+  db.prepare("UPDATE apartments SET features = ? WHERE id = ?").run(next, id);
+  res.json({ apartment: withPlan(db.prepare("SELECT * FROM apartments WHERE id = ?").get(id)) });
+});
+
 // Org admins can rename / re-tagline their own apartment; platform admin can do any.
 router.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
@@ -188,6 +241,17 @@ router.patch("/:id", (req, res) => {
   const { name, tagline, address, background_url } = req.body || {};
   if (name !== undefined && !String(name).trim()) {
     return res.status(400).json({ error: "name cannot be empty" });
+  }
+  // White-label branding (org-wide background image) is a gated feature. Setting
+  // a non-empty background requires the white_label feature on this org's plan.
+  // Clearing it (empty string) is always allowed so downgrades can tidy up.
+  if (background_url !== undefined && String(background_url).trim() &&
+      !hasFeature(existing.plan, existing.features, "white_label")) {
+    return res.status(403).json({
+      error: "White-label branding is not included in your current plan.",
+      code: "feature_unavailable",
+      feature: "white_label",
+    });
   }
   db.prepare(
     `UPDATE apartments SET

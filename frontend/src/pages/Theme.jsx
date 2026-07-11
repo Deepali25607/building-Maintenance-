@@ -148,6 +148,8 @@ export default function ThemePage() {
 }
 
 function BrandingEditor({ apartmentId, orgCode, initial, onSaved }) {
+  const { hasFeature } = useAuth();
+  const canWhiteLabel = hasFeature("white_label");
   const [name, setName] = useState(initial.name || "");
   const [tagline, setTagline] = useState(initial.tagline || "");
   const [busy, setBusy] = useState(false);
@@ -268,7 +270,16 @@ function BrandingEditor({ apartmentId, orgCode, initial, onSaved }) {
 
       <div className="mt-5 pt-4 border-t border-line">
         <div className="text-xs uppercase tracking-wide text-muted">Appearance</div>
-        <h3 className="font-display text-base font-semibold mb-2">App background image</h3>
+        <h3 className="font-display text-base font-semibold mb-2">
+          App background image
+          {!canWhiteLabel && <span className="ml-2 align-middle text-[11px]">🔒</span>}
+        </h3>
+        {!canWhiteLabel ? (
+          <p className="text-[12px] text-muted max-w-md">
+            White-label branding (a custom app background) isn’t included in your current plan.
+            {" "}<a href="/contact" className="text-brand-700 hover:underline">Contact us to upgrade</a>.
+          </p>
+        ) : (
         <div className="flex items-center gap-4 flex-wrap">
           <div className="w-44 h-24 rounded-md border border-line overflow-hidden bg-surface-2 flex items-center justify-center text-xs text-muted shrink-0">
             {bg ? <img src={bg} alt="background preview" className="w-full h-full object-cover" /> : "No image"}
@@ -292,6 +303,7 @@ function BrandingEditor({ apartmentId, orgCode, initial, onSaved }) {
             {bgErr && <p className="text-[11px] text-red-600 mt-1">{bgErr}</p>}
           </div>
         </div>
+        )}
       </div>
     </div>
   );

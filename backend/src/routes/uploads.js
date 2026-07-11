@@ -10,9 +10,11 @@ const UPLOAD_DIR = path.join(__dirname, "..", "..", "uploads");
 const AVATAR_DIR = path.join(UPLOAD_DIR, "avatars");
 const INCIDENT_DIR = path.join(UPLOAD_DIR, "incidents");
 const BACKGROUND_DIR = path.join(UPLOAD_DIR, "backgrounds");
+const STAFF_DIR = path.join(UPLOAD_DIR, "staff");
 fs.mkdirSync(AVATAR_DIR, { recursive: true });
 fs.mkdirSync(INCIDENT_DIR, { recursive: true });
 fs.mkdirSync(BACKGROUND_DIR, { recursive: true });
+fs.mkdirSync(STAFF_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: AVATAR_DIR,
@@ -95,6 +97,30 @@ router.post("/background", requireAuth, (req, res) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     res.json({ url: `/api/uploads/backgrounds/${req.file.filename}` });
+  });
+});
+
+// Staff profile photo — a webcam snapshot captured during face enrollment.
+const staffUpload = multer({
+  storage: multer.diskStorage({
+    destination: STAFF_DIR,
+    filename: (_req, file, cb) => {
+      const ext = (path.extname(file.originalname) || ".jpg").toLowerCase();
+      cb(null, `st_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED.has(file.mimetype)) return cb(new Error("Only PNG, JPEG, GIF, or WEBP images are allowed"));
+    cb(null, true);
+  },
+});
+
+router.post("/staff", requireAuth, (req, res) => {
+  staffUpload.single("file")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    res.json({ url: `/api/uploads/staff/${req.file.filename}` });
   });
 });
 

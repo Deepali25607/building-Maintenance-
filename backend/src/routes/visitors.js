@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission, can, canAccessApartment } = require("../permissions");
+const { requireFeature } = require("../features");
 const { notify } = require("../notifications");
 
 // Visitor management. Gate/security staff log a visitor and pick the flat they
@@ -9,6 +10,7 @@ const { notify } = require("../notifications");
 // then run the check-in / check-out lifecycle.
 const router = express.Router();
 router.use(requireAuth);
+router.use(requireFeature("visitors"));
 
 // "Staff" here = anyone who can run the gate lifecycle (org_admin, committee,
 // maintenance). Residents can only see/approve their own visits + pre-register.

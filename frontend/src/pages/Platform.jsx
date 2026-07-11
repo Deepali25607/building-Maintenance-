@@ -6,6 +6,7 @@ export default function Platform() {
   const [tab, setTab] = useState("orgs");
   const [orgs, setOrgs] = useState([]);
   const [plans, setPlans] = useState([]);
+  const [catalog, setCatalog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
@@ -23,6 +24,7 @@ export default function Platform() {
   useEffect(() => {
     load();
     api.get("/apartments/plans").then((r) => setPlans(r.data.plans || [])).catch(() => {});
+    api.get("/apartments/features-catalog").then((r) => setCatalog(r.data.features || [])).catch(() => {});
     api.get("/platform/contact-messages").then((r) => setUnreadMsgs(r.data.unread || 0)).catch(() => {});
   }, []);
 
@@ -36,6 +38,19 @@ export default function Platform() {
       load();
     } catch (e) {
       setErr(e.response?.data?.error || "Failed to change plan");
+    }
+  }
+
+  // Override a single feature for an org. value = true | false | null (reset).
+  async function setFeature(orgId, key, value) {
+    setErr("");
+    setMsg("");
+    try {
+      await api.patch(`/apartments/${orgId}/features`, { features: { [key]: value } });
+      setMsg("Features updated.");
+      load();
+    } catch (e) {
+      setErr(e.response?.data?.error || "Failed to update features");
     }
   }
 
@@ -82,7 +97,9 @@ export default function Platform() {
             {orgs.map((o) => (
               <OrgCard key={o.id} org={o}
                 plans={plans}
+                catalog={catalog}
                 onChangePlan={(plan) => changePlan(o.id, plan)}
+                onSetFeature={(key, value) => setFeature(o.id, key, value)}
                 onDelete={() => setDeleting(o)}
               />
             ))}
@@ -113,11 +130,19 @@ export default function Platform() {
   );
 }
 
-function OrgCard({ org, plans, onChangePlan, onDelete }) {
+function OrgCard({ org, plans, catalog, onChangePlan, onSetFeature, onDelete }) {
+  const [showFeatures, setShowFeatures] = useState(false);
   const limit = org.flat_limit; // null === unlimited
   const used = org.flat_count ?? 0;
   const atLimit = limit !== null && used >= limit;
   const flatsLabel = `${used} / ${limit === null ? "∞" : limit}`;
+
+  // Plan default for a feature = core OR listed in the plan's feature set.
+  const planFeatures = new Set((plans.find((p) => p.key === org.plan)?.features) || []);
+  const planDefault = (key, core) => core || planFeatures.has(key);
+
+  const gateable = (catalog || []).filter((c) => !c.core);
+  const enabledCount = gateable.filter((c) => !!org.features?.[c.key]).length;
 
   return (
     <div className="card p-5">
@@ -164,6 +189,47 @@ function OrgCard({ org, plans, onChangePlan, onDelete }) {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-line">
+        <button onClick={() => setShowFeatures((s) => !s)}
+          className="w-full flex items-center justify-between text-[10px] uppercase tracking-wide text-muted hover:text-fg">
+          <span>Features &amp; modules</span>
+          <span>{enabledCount}/{gateable.length} on · {showFeatures ? "▲" : "▼"}</span>
+        </button>
+        {showFeatures && (
+          <div className="mt-3 space-y-1.5">
+            {gateable.map((c) => {
+              const def = planDefault(c.key, c.core);
+              const on = !!org.features?.[c.key];
+              const overridden = on !== def;
+              return (
+                <div key={c.key} className="flex items-center justify-between gap-2 text-xs">
+                  <div className="min-w-0">
+                    <span className="truncate">{c.label}</span>
+                    <span className="ml-1.5 text-[10px] text-muted">
+                      ({c.category === "premium" ? "premium" : "module"} · default {def ? "on" : "off"})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {overridden && (
+                      <button onClick={() => onSetFeature(c.key, null)}
+                        title="Reset to plan default"
+                        className="text-[10px] text-brand-700 hover:underline">reset</button>
+                    )}
+                    <button onClick={() => onSetFeature(c.key, !on)}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                        on ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                           : "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                      {on ? "On" : "Off"}{overridden ? " ✦" : ""}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="text-[10px] text-muted pt-1">✦ = overridden from the plan default</div>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 pt-3 border-t border-line flex justify-end">

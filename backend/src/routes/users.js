@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { planFor } = require("../plans");
+const { requireFeature } = require("../features");
 const {
   MODULES,
   ACTIONS,
@@ -157,7 +158,7 @@ router.post("/", requirePermission("users", "create"), (req, res) => {
 // skipped/failed without aborting the rest — and a per-row result is returned.
 // When a row carries a flat_number, the resident is also created-or-linked to a
 // flat (respecting the org's subscription flat cap).
-router.post("/bulk-import", requirePermission("users", "create"), (req, res) => {
+router.post("/bulk-import", requireFeature("bulk_import"), requirePermission("users", "create"), (req, res) => {
   const { rows, apartment_id } = req.body || {};
   if (!Array.isArray(rows) || rows.length === 0) {
     return res.status(400).json({ error: "rows array required" });

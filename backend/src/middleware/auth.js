@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const db = require("../db");
 const { trialExpired } = require("../plans");
+const { effectiveFeatures } = require("../features");
 
 const SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
@@ -29,7 +30,7 @@ function requireAuth(req, res, next) {
     // A user is always bound to their own apartment. Cross-tenant "view as"
     // impersonation was removed so the platform operator cannot read tenant data.
     const org = row.apartment_id
-      ? db.prepare("SELECT org_code, plan, trial_ends_at FROM apartments WHERE id = ?").get(row.apartment_id)
+      ? db.prepare("SELECT org_code, plan, trial_ends_at, features FROM apartments WHERE id = ?").get(row.apartment_id)
       : null;
 
     // Hard trial gate: a logged-in user whose org trial has since expired is cut
@@ -48,6 +49,9 @@ function requireAuth(req, res, next) {
       organization_id: org?.org_code || null, // human-readable Org ID (e.g. ORG001)
       permissions: row.permissions,
     };
+    // Resolved feature map for this org (plan defaults + per-org overrides). Used
+    // by requireFeature and route logic. null for platform admins (no apartment).
+    req.features = org ? effectiveFeatures(org.plan, org.features) : null;
     next();
   } catch (e) {
     return res.status(401).json({ error: "Invalid or expired token" });

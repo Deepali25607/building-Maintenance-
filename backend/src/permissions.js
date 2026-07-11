@@ -8,6 +8,7 @@ const MODULES = [
   "vendors",
   "announcements",
   "visitors",
+  "staff",
   "reports",
   "theme",
   "contact",
@@ -38,6 +39,7 @@ const ROLE_DEFAULTS = {
     vendors: { view: true, create: true, edit: true },
     announcements: { view: true, create: true, edit: true },
     visitors: { view: true, create: true, edit: true, delete: true },
+    staff: { view: true, create: true, edit: true, delete: true },
     reports: { view: true },
     contact: { view: true },
   },
@@ -51,6 +53,7 @@ const ROLE_DEFAULTS = {
     vendors: { view: true, create: true, edit: true },
     announcements: { view: true },
     visitors: { view: true },
+    staff: { view: true },
     reports: { view: true },
     contact: { view: true },
   },
@@ -61,6 +64,8 @@ const ROLE_DEFAULTS = {
     announcements: { view: true },
     // Residents see/approve visits to their own flat and can pre-register guests.
     visitors: { view: true, create: true },
+    // Residents see attendance of helpers assigned to their own flats.
+    staff: { view: true },
     contact: { view: true },
   },
   maintenance: {
@@ -68,6 +73,8 @@ const ROLE_DEFAULTS = {
     announcements: { view: true },
     // Gate/security staff: log visitors and run the check-in/out lifecycle.
     visitors: { view: true, create: true, edit: true },
+    // Gate staff register service providers and run the face/manual punch kiosk.
+    staff: { view: true, create: true, edit: true },
     contact: { view: true },
   },
 };

@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission } = require("../permissions");
+const { requireFeature } = require("../features");
 
 // Accounting & Finance (BRD Module 8). Read-only financial reporting derived
 // from existing data: income = recorded payments (real cash in, dated by
@@ -9,6 +10,7 @@ const { requirePermission } = require("../permissions");
 // the same "reports" permission as the Reports page (treasurer/committee/admin).
 const router = express.Router();
 router.use(requireAuth);
+router.use(requireFeature("accounting"));
 router.use(requirePermission("reports", "view"));
 
 const PAID_EXPENSE = "('approved','paid')";

@@ -2,11 +2,13 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { channelStatus } = require("../notifications");
+const { requireFeature } = require("../features");
 
 // Personal notification feed (BRD Module 12). Every row belongs to one user;
 // these endpoints are always scoped to req.user.id — no cross-user reads.
 const router = express.Router();
 router.use(requireAuth);
+router.use(requireFeature("notifications"));
 
 router.get("/", (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 30, 100);

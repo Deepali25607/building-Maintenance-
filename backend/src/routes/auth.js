@@ -4,6 +4,7 @@ const db = require("../db");
 const { signToken, requireAuth } = require("../middleware/auth");
 const { effectivePermissions } = require("../permissions");
 const { planFor, trialInfo } = require("../plans");
+const { effectiveFeatures } = require("../features");
 
 const router = express.Router();
 
@@ -28,10 +29,17 @@ router.post("/register", (req, res) => {
 
 function apartmentFor(apId) {
   if (!apId) return null;
-  const ap = db.prepare("SELECT id, org_code, name, tagline, background_url, plan, trial_ends_at FROM apartments WHERE id = ?").get(apId);
+  const ap = db.prepare("SELECT id, org_code, name, tagline, background_url, plan, trial_ends_at, features FROM apartments WHERE id = ?").get(apId);
   if (!ap) return null;
   const p = planFor(ap.plan);
-  return { ...ap, plan: p.key, plan_name: p.name, ...(trialInfo(p.key, ap.trial_ends_at) || {}) };
+  return {
+    ...ap,
+    plan: p.key,
+    plan_name: p.name,
+    // Resolved feature map so the client can gate nav/routes (user.apartment.features).
+    features: effectiveFeatures(p.key, ap.features),
+    ...(trialInfo(p.key, ap.trial_ends_at) || {}),
+  };
 }
 
 router.post("/login", (req, res) => {

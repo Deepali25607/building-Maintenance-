@@ -2,9 +2,11 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission, canAccessApartment, isPlatformAdmin } = require("../permissions");
+const { requireFeature } = require("../features");
 
 const router = express.Router();
 router.use(requireAuth);
+router.use(requireFeature("expenses"));
 
 const CATEGORIES = [
   "Security Guard Salary",

@@ -25,6 +25,7 @@ app.use("/api/incidents", require("./routes/incidents"));
 app.use("/api/expenses", require("./routes/expenses"));
 app.use("/api/vendors", require("./routes/vendors"));
 app.use("/api/visitors", require("./routes/visitors"));
+app.use("/api/staff", require("./routes/staff"));
 app.use("/api/announcements", require("./routes/announcements"));
 app.use("/api/theme", require("./routes/theme"));
 app.use("/api/dashboard", require("./routes/dashboard"));

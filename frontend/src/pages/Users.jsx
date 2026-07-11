@@ -6,7 +6,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 const ROLES = ["super_admin", "committee", "treasurer", "resident", "maintenance"];
 
 export default function Users() {
-  const { can, user: currentUser } = useAuth();
+  const { can, hasFeature, user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [openNew, setOpenNew] = useState(false);
   const [openImport, setOpenImport] = useState(false);
@@ -39,7 +39,9 @@ export default function Users() {
         </div>
         {canCreateUsers && (
           <div className="flex gap-2">
-            <button className="btn-secondary" onClick={() => setOpenImport(true)}>⬆ Import residents</button>
+            {hasFeature("bulk_import") && (
+              <button className="btn-secondary" onClick={() => setOpenImport(true)}>⬆ Import residents</button>
+            )}
             <button className="btn-primary" onClick={() => setOpenNew(true)}>+ Add user</button>
           </div>
         )}
